@@ -15,7 +15,9 @@ def uniform_quantize(k):  # 基础量化操作
                 out = torch.sign(input)  # 1-bit二值化，sign为符号函数sgn
             else:
                 n = float(2 ** k - 1)  # 量化级别数（公式2中的分母）
-                out = torch.round(input * n) / n  # 公式1-3 核心量化操作 out = w_hat
+                # 添加clamp确保输入在合理范围内
+                input_clamped = torch.clamp(input, 0, 1)
+                out = torch.round(input_clamped * n) / n  # 公式1-3 核心量化操作 out = w_hat
             return out
 
         @staticmethod
