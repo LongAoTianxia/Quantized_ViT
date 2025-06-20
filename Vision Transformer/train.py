@@ -197,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('--model-name', default='', help='create model name')
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default='D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth',
+    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/vision_transformer/weights/weightsSave/model-9_ball.pth",
                         help='initial weights path')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=True)
