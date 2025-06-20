@@ -580,6 +580,8 @@ class QuantizedVisionTransformer(nn.Module):
         # position embedding
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))  # (1,196+1,768)
         self.pos_drop = nn.Dropout(p=drop_ratio)
+        # 添加位置嵌入后的量化
+        self.pos_quant = quant.activation_quantize_fn(a_bit=out_bit)
         # Encoder Block中 每个传入DropPath的drop_path_ratio为等差序列
         dpr = [x.item() for x in torch.linspace(0, drop_path_ratio, depth)]  # stochastic depth decay rule
         # Transformer Encoder
@@ -598,21 +600,22 @@ class QuantizedVisionTransformer(nn.Module):
         if representation_size and not distilled:
             self.has_logits = True
             self.num_features = representation_size
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
             self.pre_logits = nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(embed_dim, representation_size)),
-                ("act", nn.Tanh())
+                ("fc", Linear_Q(embed_dim, representation_size)),
+                ("act", nn.Tanh()),
+                ("quant", quant.activation_quantize_fn(a_bit=out_bit))
             ]))
         else:
             self.has_logits = False
             self.pre_logits = nn.Identity()
 
         # Classifier head(s)     MLP Head中的Linear
-        self.head = quant.QuantizedLinear(self.num_features, num_classes, w_bit=w_bit, in_bit=in_bit,
-                                                out_bit=out_bit) if num_classes > 0 else nn.Identity()
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.head = Linear_Q(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
         self.head_dist = None
         if distilled:
-            self.head_dist = quant.QuantizedLinear(self.embed_dim, self.num_classes, w_bit=w_bit, in_bit=in_bit,
-                                                         out_bit=out_bit) if num_classes > 0 else nn.Identity()
+            self.head_dist = Linear_Q(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
         # Weight init
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
@@ -638,6 +641,7 @@ class QuantizedVisionTransformer(nn.Module):
         """Concat(Class token) -> +Position Embedding -> Dropout"""
         # +pos_embed:(1, 1+N, E)，再加一个dropout层
         x = self.pos_drop(x + self.pos_embed)
+        x = self.pos_quant(x)
         """Dropout -> Transformer Encoder (堆叠12次Encoder Block) """
         x = self.blocks(x)
         """Transformer Encoder -> Layer Norm """
