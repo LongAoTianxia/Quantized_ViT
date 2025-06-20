@@ -103,13 +103,14 @@ class QuantizedPatchEmbed(nn.Module):
         # 并将每个patch编码为一个嵌入向量，输出的形状为[B, embed_dim, grid_size[0], grid_size[1]]
         x = self.proj(x)
 
-        # 激活量化
-        x = self.act_quant(x)
-
         # 重塑，并将嵌入向量传递给归一化层norm进行归一化处理
         # flatten: [B, C, H, W] -> [B, C, HW]   将每个patch展平为一个向量
         # transpose: [B, C, HW] -> [B, HW, C]   将嵌入向量的维度放在第二个维度上
         x = x.flatten(2).transpose(1, 2)
+
+        # 激活量化
+        x = self.act_quant(x)
+
         x = self.norm(x)
         return x
 
@@ -238,10 +239,10 @@ class QuantizedAttention(nn.Module):
         # 量化的, 将多头注意力的输出进行投影
         self.proj = Linear_Q(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop_ratio)  # 在投影输出上应用dropout
-        # 注意力分数的量化
-        self.uniform_q = quant.uniform_quantize(k=w_bit - 1)
+
         # 激活量化
-        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.attn_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
     def forward(self, x):
         # [batch_size, num_patches + 1, total_embed_dim]    (196+1, 768)
@@ -251,7 +252,9 @@ class QuantizedAttention(nn.Module):
         # qkv(): -> [batch_size, num_patches + 1, 3 * total_embed_dim]
         # reshape: -> [batch_size, num_patches + 1, 3(qkv三个参数), num_heads, embed_dim_per_head]
         # permute: -> [3, batch_size, num_heads, num_patches + 1, embed_dim_per_head]
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = self.qkv(x)
+        qkv = self.qkv_quant(qkv)  # 量化QKV输出
+        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         # [batch_size, num_heads, num_patches + 1, embed_dim_per_head]
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
@@ -318,7 +321,7 @@ class QuantizedMlp(nn.Module):
 
         # 激活函数量化
         self.act = act_layer()
-        self.act_quant = quant.activation_quantize_fn(a_bit=w_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
@@ -328,7 +331,7 @@ class QuantizedMlp(nn.Module):
         x = self.act_quant(x)  # 激活后量化
         x = self.drop(x)
         x = self.fc2(x)  # [197,3072] -> [198, 768]
-        x = self.act_quant(x)  # 输出量化
+        # 此处不量化，在Block层统一处理
         x = self.drop(x)
         return x
 
@@ -405,7 +408,7 @@ class QuantizedBlock(nn.Module):
         residual = x
         x = self.drop_path(self.attn(self.norm1(x)))
         x = x + residual
-        x =self.residual_quant(x)  # 残差连接后量化
+        x = self.residual_quant(x)  # 残差连接后量化
 
         # 第二个残差连接
         residual = x
@@ -712,12 +715,12 @@ def vit_base_patch16_224_in21k(num_classes: int = 21843, has_logits: bool = True
     https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_patch16_224_in21k-e5005f0a.pth
     """
     model = VisionTransformer(img_size=224,
-                              patch_size=16,
-                              embed_dim=768,
-                              depth=12,
-                              num_heads=12,
-                              representation_size=768 if has_logits else None,
-                              num_classes=num_classes)
+                                       patch_size=16,
+                                       embed_dim=768,
+                                       depth=12,
+                                       num_heads=12,
+                                       representation_size=768 if has_logits else None,
+                                       num_classes=num_classes)
     return model
 
 
