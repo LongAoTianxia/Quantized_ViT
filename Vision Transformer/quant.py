@@ -74,49 +74,6 @@ class activation_quantize_fn(nn.Module):  # 激活量化
         return activation_q
 
 
-class QuantizedLinear(nn.Module):
-    """
-    (新增)量化后线性层
-    """
-
-    def __init__(self, in_features, out_features, bias=True,
-                 w_bit=4, in_bit=4, out_bit=4, l_shift=8):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.w_bit = w_bit
-        self.in_bit = in_bit
-        self.out_bit = out_bit
-        self.l_shift = l_shift
-        # Actual weights and bias
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_features))
-        else:
-            self.register_parameter('bias', None)
-        # Initialize parameters
-        nn.init.kaiming_uniform_(self.weight)
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
-
-    def forward(self, x):
-        # Quantize input
-        x_int = torch.clamp(x * (2 ** self.in_bit - 1), 0, 2 ** self.in_bit - 1)
-        x_int = torch.round(x_int)
-        # Quantize weights
-        w_scale = (2 ** (self.w_bit - 1) - 1)
-        w_int = torch.clamp(self.weight * w_scale, -w_scale, w_scale - 1)
-        w_int = torch.round(w_int)
-        # Compute output
-        out = F.linear(x_int, w_int)
-        if self.bias is not None:
-            out = out + self.bias * (2 ** self.l_shift)
-        # Scale output
-        out = out / (2 ** self.l_shift)
-        out = torch.clamp(out, 0, 2 ** self.out_bit - 1)
-        return out
-
-
 def conv2d_Q_fn(w_bit):  # 量化卷积层
     class Conv2d_Q(nn.Conv2d):
         def __init__(self, in_channels, out_channels, kernel_size, stride=1,
