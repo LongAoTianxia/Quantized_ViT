@@ -6,7 +6,7 @@ from PIL import Image
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from vit_model import vit_base_patch16_224_in21k as create_model  # 导入和训练脚本中同样的模型
+from vit_model import vit_base_patch16_224_in21k_Qua as create_model  # 导入和训练脚本中同样的模型
 
 
 def main():
