@@ -125,7 +125,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, use_mixed_prec
 
     # 添加混合精度支持
     if use_mixed_precision:
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
 
     sample_num = 0
     data_loader = tqdm(data_loader, file=sys.stdout)
@@ -134,7 +134,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, use_mixed_prec
         sample_num += images.shape[0]
 
         if use_mixed_precision:
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 pred = model(images.to(device))
                 loss = loss_function(pred, labels.to(device))
 
