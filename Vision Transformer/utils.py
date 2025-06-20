@@ -115,12 +115,17 @@ def read_pickle(file_name: str) -> list:
         return info_list
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, use_mixed_precision=False):
+    """量化模型的训练函数，支持混合精度训练"""
     model.train()
     loss_function = torch.nn.CrossEntropyLoss()
     accu_loss = torch.zeros(1).to(device)  # 累计损失
     accu_num = torch.zeros(1).to(device)   # 累计预测正确的样本数
     optimizer.zero_grad()
+
+    # 添加混合精度支持
+    if use_mixed_precision:
+        scaler = torch.cuda.amp.GradScaler()
 
     sample_num = 0
     data_loader = tqdm(data_loader, file=sys.stdout)
@@ -128,12 +133,22 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch):
         images, labels = data
         sample_num += images.shape[0]
 
-        pred = model(images.to(device))
+        if use_mixed_precision:
+            with torch.cuda.amp.autocast():
+                pred = model(images.to(device))
+                loss = loss_function(pred, labels.to(device))
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            pred = model(images.to(device))
+            loss = loss_function(pred, labels.to(device))
+            loss.backward()
+            optimizer.step()
+
         pred_classes = torch.max(pred, dim=1)[1]
         accu_num += torch.eq(pred_classes, labels.to(device)).sum()
-
-        loss = loss_function(pred, labels.to(device))
-        loss.backward()
         accu_loss += loss.detach()
 
         data_loader.desc = "[train epoch {}] loss: {:.3f}, acc: {:.3f}".format(epoch,
@@ -144,7 +159,6 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch):
             print('WARNING: non-finite loss, ending training ', loss)
             sys.exit(1)
 
-        optimizer.step()
         optimizer.zero_grad()
 
     return accu_loss.item() / (step + 1), accu_num.item() / sample_num
@@ -177,3 +191,5 @@ def evaluate(model, data_loader, device, epoch):
                                                                                accu_num.item() / sample_num)
 
     return accu_loss.item() / (step + 1), accu_num.item() / sample_num
+
+
