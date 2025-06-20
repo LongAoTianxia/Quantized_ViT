@@ -55,6 +55,23 @@ class weight_quantize_fn(nn.Module):  # 权重量化
         return weight_q
 
 
+class activation_quantize_fn(nn.Module):  # 激活量化
+    def __init__(self, a_bit):
+        super(activation_quantize_fn, self).__init__()
+        assert a_bit <= 8 or a_bit == 32
+        self.a_bit = a_bit
+        self.uniform_q = uniform_quantize(k=a_bit)
+
+    def forward(self, x):
+        if self.a_bit == 32:
+            activation_q = x
+            # activation_q = torch.clamp(x, 0, 6)  # ==ReLU6 = min(6,max(0,x)) = clip(x,0,6)
+        else:
+            activation_q = self.uniform_q(torch.clamp(x, 0, 1))  # clamp(x,l,h) == 公式1中clip(x,l,h)，把大于h的值设置为h，把小于l的值设置为l
+            # print(np.unique(activation_q.detach().numpy()))
+        return activation_q
+
+
 class QuantizedLinear(nn.Module):
     """
     (新增)量化后线性层
@@ -98,23 +115,6 @@ class QuantizedLinear(nn.Module):
         return out
 
 
-class activation_quantize_fn(nn.Module):  # 激活量化
-    def __init__(self, a_bit):
-        super(activation_quantize_fn, self).__init__()
-        assert a_bit <= 8 or a_bit == 32
-        self.a_bit = a_bit
-        self.uniform_q = uniform_quantize(k=a_bit)
-
-    def forward(self, x):
-        if self.a_bit == 32:
-            activation_q = x
-            # activation_q = torch.clamp(x, 0, 6)  # ==ReLU6 = min(6,max(0,x)) = clip(x,0,6)
-        else:
-            activation_q = self.uniform_q(torch.clamp(x, 0, 1))  # clamp(x,l,h) == 公式1中clip(x,l,h)，把大于h的值设置为h，把小于l的值设置为l
-            # print(np.unique(activation_q.detach().numpy()))
-        return activation_q
-
-
 def conv2d_Q_fn(w_bit):  # 量化卷积层
     class Conv2d_Q(nn.Conv2d):
         def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -131,3 +131,17 @@ def conv2d_Q_fn(w_bit):  # 量化卷积层
                             self.padding, self.dilation, self.groups)
 
     return Conv2d_Q
+
+
+def linear_Q_fn(w_bit):  # 量化线性层
+    class Linear_Q(nn.Linear):
+        def __init__(self, in_features, out_features, bias=True):
+            super(Linear_Q, self).__init__(in_features, out_features, bias)
+            self.w_bit = w_bit
+            self.quantize_fn = weight_quantize_fn(w_bit=w_bit)
+
+        def forward(self, input):
+            weight_q = self.quantize_fn(self.weight)  # 量化权重
+            return F.linear(input, weight_q, self.bias)
+
+    return Linear_Q
