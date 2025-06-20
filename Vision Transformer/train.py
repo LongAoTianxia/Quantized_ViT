@@ -45,6 +45,7 @@ def main(args):
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
     # 图片预处理 （224x224x3大小，并进行其他预处理）
+    '''
     data_transform = {
         "train": transforms.Compose([transforms.RandomResizedCrop(224),
                                      transforms.RandomHorizontalFlip(),
@@ -69,7 +70,6 @@ def main(args):
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
     }
-    '''
 
     # 实例化训练数据集
     train_dataset = MyDataSet(images_path=train_images_path,
@@ -185,7 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
     parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次 10
     parser.add_argument('--batch-size', type=int, default=16)    # 8
-    parser.add_argument('--lr', type=float, default=0.00005)  # 更小的学习率 0.001
+    parser.add_argument('--lr', type=float, default=0.0005)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
     parser.add_argument('--mixed-precision', type=bool, default=False)
