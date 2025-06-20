@@ -11,8 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 
 from my_dataset import MyDataSet
-#from vit_model import vit_base_patch16_224_in21k_Qua as create_model
-from vit_model import vit_base_patch16_224_in21k as create_model
+from vit_model import vit_base_patch16_224_in21k_Qua as create_model
 from utils import read_split_data, train_one_epoch, evaluate
 
 def extract_tar_gz(tar_path, extract_dir):
@@ -55,6 +54,22 @@ def main(args):
                                    transforms.CenterCrop(224),
                                    transforms.ToTensor(),
                                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])}
+    '''
+    data_transform = {
+        "train": transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # ImageNet标准化
+        ]),
+        "val": transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    }
+    '''
 
     # 实例化训练数据集
     train_dataset = MyDataSet(images_path=train_images_path,
@@ -90,12 +105,19 @@ def main(args):
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
         weights_dict = torch.load(args.weights, map_location=device)
-        # 删除不需要的权重
-        del_keys = ['head.weight', 'head.bias'] if model.has_logits \
-            else ['pre_logits.fc.weight', 'pre_logits.fc.bias', 'head.weight', 'head.bias']
-        for k in del_keys:
-            del weights_dict[k]
-        print(model.load_state_dict(weights_dict, strict=False))
+
+        # 如果是原始VIT权重，需要适配量化模型
+        if 'model_state_dict' not in weights_dict:
+            # 处理原始VIT权重
+            del_keys = ['head.weight', 'head.bias'] if model.has_logits \
+                else ['pre_logits.fc.weight', 'pre_logits.fc.bias', 'head.weight', 'head.bias']
+            for k in del_keys:
+                if k in weights_dict:
+                    del weights_dict[k]
+            print(model.load_state_dict(weights_dict, strict=False))
+        else:
+            # 加载量化模型权重
+            model.load_state_dict(weights_dict['model_state_dict'])
 
     # 冻结特征提取层
     if args.freeze_layers:
@@ -107,27 +129,37 @@ def main(args):
                 print("training {}".format(name))
 
     pg = [p for p in model.parameters() if p.requires_grad]
-    optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
-    # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
+    # 量化模型可能需要更小的学习率
+    optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
+    # optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
+
+    # 使用余弦退火学习率
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.01)
+
+    # Scheduler https://arxiv.org/pdf/1812.01187.pdf
+    # lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
+    # scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+
+    best_acc = 0.0
     for epoch in range(args.epochs):
-        # train
+        # 训练
         train_loss, train_acc = train_one_epoch(model=model,
                                                 optimizer=optimizer,
                                                 data_loader=train_loader,
                                                 device=device,
-                                                epoch=epoch)
+                                                epoch=epoch,
+                                                use_mixed_precision=args.mixed_precision)
 
         scheduler.step()
 
-        # validate
+        # 验证
         val_loss, val_acc = evaluate(model=model,
                                      data_loader=val_loader,
                                      device=device,
                                      epoch=epoch)
 
+        # 记录日志
         tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
         tb_writer.add_scalar(tags[0], train_loss, epoch)
         tb_writer.add_scalar(tags[1], train_acc, epoch)
@@ -135,21 +167,28 @@ def main(args):
         tb_writer.add_scalar(tags[3], val_acc, epoch)
         tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
 
-        torch.save(model.state_dict(), "./weights/model-{}.pth".format(epoch))
-    # 新增：清理临时目录 ---------------------------------
-    #if temp_extract_dir and os.path.exists(temp_extract_dir):
-     #   print(f"Cleaning up temp directory: {temp_extract_dir}")
-     #   import shutil
-      #  shutil.rmtree(temp_extract_dir)
-    # -------------------------------------------------
+        # 定期保存检查点
+        if (epoch + 1) % 5 ==0:
+            torch.save(model.state_dict(), "./weights/model-{}.pth".format(epoch))
+
+        # 保存最佳模型
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), "./weights/best_model.pth")
+            print(f"Best model saved with accuracy: {best_acc:.4f}")
+
+    print(f"Training completed. Best validation accuracy: {best_acc:.4f}")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--batch-size', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--epochs', type=int, default=30)       # 量化模型可能需要更多轮次 10
+    parser.add_argument('--batch-size', type=int, default=16)    # 8
+    parser.add_argument('--lr', type=float, default=0.0005)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
+    parser.add_argument('--weight-decay', type=float, default=0.05)
+    parser.add_argument('--mixed-precision', type=bool, default=True)
 
     # 数据集所在根目录
     # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
