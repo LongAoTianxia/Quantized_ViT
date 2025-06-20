@@ -242,7 +242,7 @@ class QuantizedAttention(nn.Module):
 
         # 激活量化
         self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
-        self.attn_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
     def forward(self, x):
         # [batch_size, num_patches + 1, total_embed_dim]    (196+1, 768)
