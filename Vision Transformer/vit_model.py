@@ -263,6 +263,7 @@ class QuantizedAttention(nn.Module):
         # transpose: -> [batch_size, num_heads, embed_dim_per_head, num_patches + 1]
         # @: multiply矩阵乘法(只对最后两个维度操作) -> [batch_size, num_heads, num_patches + 1, num_patches + 1]
         attn = (q @ k.transpose(-2, -1)) * self.scale  # QK^{T}/sqrt(d_{k})
+        attn = self.act_quant(attn)  # 量化注意力分数
         attn = attn.softmax(dim=-1)  # -1代表最后一个维度，即对每一行进行softmax处理  softmax( QK^{T}/sqrt(d_{k}) )
         # softmax后的注意力权重通常不需要量化，因为它们已经在[0,1]范围内
         attn = self.attn_drop(attn)  # 在注意力权重上应用dropout
@@ -545,7 +546,7 @@ class QuantizedVisionTransformer(nn.Module):
                  qk_scale=None, representation_size=None, distilled=False, drop_ratio=0.,
                  attn_drop_ratio=0., drop_path_ratio=0., embed_layer=QuantizedPatchEmbed, norm_layer=None,
                  act_layer=None,
-                 w_bit=4, in_bit=4, out_bit=4):
+                 w_bit=8, in_bit=8, out_bit=8):
         """
         Args:
             img_size (int, tuple): input image size
@@ -738,7 +739,7 @@ def vit_base_patch16_224_in21k_Qua(num_classes: int = 21843, has_logits: bool = 
                                        num_heads=12,
                                        representation_size=768 if has_logits else None,
                                        num_classes=num_classes,
-                                       w_bit=4, in_bit=4, out_bit=4)
+                                       w_bit=8, in_bit=8, out_bit=8)
     return model
 
 
