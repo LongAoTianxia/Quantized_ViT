@@ -131,11 +131,7 @@ def main(args):
     pg = [p for p in model.parameters() if p.requires_grad]
 
     # 量化模型可能需要更小的学习率
-    # optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
     optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
-
-    # 使用余弦退火学习率
-    # scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.01)
 
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
@@ -183,9 +179,9 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
-    parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次 10
-    parser.add_argument('--batch-size', type=int, default=16)    # 8
-    parser.add_argument('--lr', type=float, default=0.00001)  # 更小的学习率 0.001
+    parser.add_argument('--epochs', type=int, default=10)       # 量化模型可能需要更多轮次 10
+    parser.add_argument('--batch-size', type=int, default=8)    # 8
+    parser.add_argument('--lr', type=float, default=0.001)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
     parser.add_argument('--mixed-precision', type=bool, default=True)
@@ -197,7 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--model-name', default='', help='create model name')
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/vision_transformer/weights/weightsSave/model-9_ball.pth",
+    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth",
                         help='initial weights path')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
