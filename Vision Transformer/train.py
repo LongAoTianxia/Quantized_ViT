@@ -22,7 +22,7 @@ def extract_tar_gz(tar_path, extract_dir):
 
 def main(args):
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-
+    """
     # 新增：处理 .tar.gz 数据集 ---------------------------------
     original_data_path = args.data_path
     temp_extract_dir = None
@@ -36,7 +36,7 @@ def main(args):
         extract_tar_gz(args.data_path, temp_extract_dir)
         args.data_path = temp_extract_dir  # 使用解压后的路径
     # ---------------------------------------------------------
-
+    """
     if os.path.exists("./weights") is False:
         os.makedirs("./weights")
 
@@ -45,7 +45,7 @@ def main(args):
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
     # 图片预处理 （224x224x3大小，并进行其他预处理）
-    '''
+    """
     data_transform = {
         "train": transforms.Compose([transforms.RandomResizedCrop(224),
                                      transforms.RandomHorizontalFlip(),
@@ -55,7 +55,7 @@ def main(args):
                                    transforms.CenterCrop(224),
                                    transforms.ToTensor(),
                                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])}
-    '''
+    """
     data_transform = {
         "train": transforms.Compose([
             transforms.RandomResizedCrop(224),
@@ -131,15 +131,15 @@ def main(args):
     pg = [p for p in model.parameters() if p.requires_grad]
 
     # 量化模型可能需要更小的学习率
-    optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
-    # optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
+    # optimizer = optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
 
     # 使用余弦退火学习率
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.01)
+    # scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.01)
 
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    # lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
-    # scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
     best_acc = 0.0
     for epoch in range(args.epochs):
@@ -185,10 +185,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
     parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次 10
     parser.add_argument('--batch-size', type=int, default=16)    # 8
-    parser.add_argument('--lr', type=float, default=0.0005)  # 更小的学习率 0.001
+    parser.add_argument('--lr', type=float, default=0.00001)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
-    parser.add_argument('--mixed-precision', type=bool, default=False)
+    parser.add_argument('--mixed-precision', type=bool, default=True)
 
     # 数据集所在根目录
     # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
@@ -200,7 +200,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/vision_transformer/weights/weightsSave/model-9_ball.pth",
                         help='initial weights path')
     # 是否冻结权重
-    parser.add_argument('--freeze-layers', type=bool, default=True)
+    parser.add_argument('--freeze-layers', type=bool, default=False)
     parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
 
     opt = parser.parse_args()
