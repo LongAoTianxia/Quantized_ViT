@@ -114,6 +114,15 @@ class QuantizedPatchEmbed(nn.Module):
         x = self.norm(x)
         return x
 
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        self.w_bit = w_bit
+        self.in_bit = in_bit
+        self.out_bit = out_bit
+        Conv2d_Q = quant.conv2d_Q_fn(w_bit=self.w_bit)
+        self.proj = Conv2d_Q(self.proj.in_channels, self.proj.out_channels,
+                             kernel_size=self.proj.kernel_size, stride=self.proj.stride)
+        self.act_quant = quant.activation_quantize_fn(a_bit=self.out_bit)
+
 
 class PatchEmbed(nn.Module):
     """
@@ -279,6 +288,13 @@ class QuantizedAttention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.qkv = Linear_Q(self.qkv.in_features, self.qkv.out_features, bias=self.qkv.bias is not None)
+        self.proj = Linear_Q(self.proj.in_features, self.proj.out_features, bias=self.proj.bias is not None)
+        self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
+
 
 class Mlp(nn.Module):
     """
@@ -336,6 +352,11 @@ class QuantizedMlp(nn.Module):
         x = self.drop(x)
         return x
 
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.fc1 = Linear_Q(self.fc1.in_features, self.fc1.out_features, bias=self.fc1.bias is not None)
+        self.fc2 = Linear_Q(self.fc2.in_features, self.fc2.out_features, bias=self.fc2.bias is not None)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 class Block(nn.Module):
     def __init__(self,
@@ -418,6 +439,11 @@ class QuantizedBlock(nn.Module):
         x = self.residual_quant(x)  # 残差连接后量化
 
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        self.attn.set_quant_bit(w_bit, in_bit, out_bit)
+        self.mlp.set_quant_bit(w_bit, in_bit, out_bit)
+        self.residual_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 
 class VisionTransformer(nn.Module):
@@ -546,7 +572,7 @@ class QuantizedVisionTransformer(nn.Module):
                  qk_scale=None, representation_size=None, distilled=False, drop_ratio=0.,
                  attn_drop_ratio=0., drop_path_ratio=0., embed_layer=QuantizedPatchEmbed, norm_layer=None,
                  act_layer=None,
-                 w_bit=8, in_bit=8, out_bit=8):
+                 w_bit=4, in_bit=4, out_bit=4):
         """
         Args:
             img_size (int, tuple): input image size
@@ -669,6 +695,17 @@ class QuantizedVisionTransformer(nn.Module):
         else:
             x = self.head(x)
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        self.patch_embed.set_quant_bit(w_bit, in_bit, out_bit)
+        for m in self.blocks:
+            m.set_quant_bit(w_bit, in_bit, out_bit)
+        if hasattr(self, 'pre_logits') and hasattr(self.pre_logits[0], 'set_quant_bit'):
+            self.pre_logits[0].set_quant_bit(w_bit)
+        if hasattr(self.head, 'set_quant_bit'):
+            self.head.set_quant_bit(w_bit)
+        if hasattr(self.head_dist, 'set_quant_bit'):
+            self.head_dist.set_quant_bit(w_bit)
 
 
 def _init_vit_weights(m):
