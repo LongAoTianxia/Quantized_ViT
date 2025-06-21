@@ -15,9 +15,7 @@ def uniform_quantize(k):  # 基础量化操作
                 out = torch.sign(input)  # 1-bit二值化，sign为符号函数sgn
             else:
                 n = float(2 ** k - 1)  # 量化级别数（公式2中的分母）
-                # 添加clamp确保输入在合理范围内
-                input_clamped = torch.clamp(input, 0, 1)
-                out = torch.round(input_clamped * n) / n  # 公式1-3 核心量化操作 out = w_hat
+                out = torch.round(input * n) / n  # 公式1-3 核心量化操作 out = w_hat
             return out
 
         @staticmethod
@@ -47,8 +45,9 @@ class weight_quantize_fn(nn.Module):  # 权重量化
             weight_q = (self.uniform_q(x / E) + 1) / 2 * E  # 二值特殊处理
         else:
             # clip(v,l,h) 把大于h的值设置为h，把小于l的值设置为l
-            weight = torch.tanh(
-                x)  # 用tanh约束权重范围（公式1的clip替代） soft_clip(x,a,b)=b⋅ tanh(ax) (公式5)  这里固定a=b=1(原为可学习参数)，a，b使soft_clip(x,a,b)逼近clip(v,l,h)
+            # 用tanh约束权重范围（公式1的clip替代） soft_clip(x,a,b)=b⋅ tanh(ax) (公式5)
+            # 这里固定a=b=1(原为可学习参数)，a，b使soft_clip(x,a,b)逼近clip(v,l,h)
+            weight = torch.tanh(x)
             # weight = weight / 2 / torch.max(torch.abs(weight)) + 0.5
             # weight_q = 2 * self.uniform_q(weight) - 1
             weight = weight / torch.max(torch.abs(weight))  # 归一化到[-1,1]
@@ -85,6 +84,11 @@ def conv2d_Q_fn(w_bit):  # 量化卷积层
 
         def forward(self, input, order=None):
             weight_q = self.quantize_fn(self.weight)  # 量化的权重
+            bias = self.bias
+            if bias is not None:
+                # 保证bias和input的dtype、device一致
+                if bias.dtype != input.dtype or bias.device != input.device:
+                    bias = bias.to(dtype=input.dtype, device=input.device)
             # print(np.unique(weight_q.detach().numpy()))
             return F.conv2d(input, weight_q, self.bias, self.stride,  # 标准卷积计算
                             self.padding, self.dilation, self.groups)
@@ -101,6 +105,11 @@ def linear_Q_fn(w_bit):  # 量化线性层
 
         def forward(self, input):
             weight_q = self.quantize_fn(self.weight)  # 量化权重
+            bias = self.bias
+            # AMP兼容：bias与input类型保持一致
+            if bias is not None:
+                if bias.dtype != input.dtype or bias.device != input.device:
+                    bias = bias.to(dtype=input.dtype, device=input.device)
             return F.linear(input, weight_q, self.bias)
 
     return Linear_Q
