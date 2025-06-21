@@ -144,11 +144,12 @@ def main(args):
     # ---- Warmup：先FP32训练 -----
     print("==== Warmup FP32 Training (no quantization) ====")
     model.set_quant_bit(32, 32, 32)
-    warmup_epochs = 10  # 可根据实际情况设为10~20
+    warmup_epochs = 1  # 可根据实际情况设为10~20
+    warmup_optimizer = torch.optim.AdamW(pg, lr=0.001, weight_decay=args.weight_decay)
     for epoch in range(warmup_epochs):
         train_loss, train_acc = train_one_epoch(
             model=model,
-            optimizer=optimizer,
+            optimizer=warmup_optimizer,
             data_loader=train_loader,
             device=device,
             epoch=epoch,
@@ -162,16 +163,17 @@ def main(args):
     best_acc = 0.0
     for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
         print(f"\n=== QAT Stage {stage + 1}: {w_bit}bit ===")
-        model.set_quant_bit(w_bit, in_bit, out_bit)
+        model.set_quant_bit(w_bit, in_bit, out_bit, only_head_mlp=True) # 仅对MLP Head进行量化
+        qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
         # 可选：每阶段重置学习率调度器
         lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
-        scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+        scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
         # 每阶段保存best权重
         stage_best_acc = 0.0
         for epoch in range(stage_epochs[stage]):
             global_epoch = start_epoch + epoch
             # 训练
-            train_loss, train_acc = train_one_epoch(model=model, optimizer=optimizer, data_loader=train_loader,
+            train_loss, train_acc = train_one_epoch(model=model, optimizer=qat_optimizer, data_loader=train_loader,
                                                     device=device, epoch=global_epoch,
                                                     use_mixed_precision=args.mixed_precision)
             scheduler.step()
@@ -183,7 +185,7 @@ def main(args):
             tb_writer.add_scalar(tags[1], train_acc, global_epoch)
             tb_writer.add_scalar(tags[2], val_loss, global_epoch)
             tb_writer.add_scalar(tags[3], val_acc, global_epoch)
-            tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], global_epoch)
+            tb_writer.add_scalar(tags[4], qat_optimizer.param_groups[0]["lr"], global_epoch)
             # 每阶段定期保存检查点
             if (epoch + 1) % 5 == 0:
                 torch.save(model.state_dict(), f"./weights/model-{global_epoch}.pth")
