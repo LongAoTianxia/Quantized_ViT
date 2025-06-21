@@ -21,6 +21,10 @@ def extract_tar_gz(tar_path, extract_dir):
     print(f"Extracted dataset to: {extract_dir}")
 
 def main(args):
+    # 定义分阶段QAT的bit宽度设置
+    bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
+    stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
+
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     """
     # 新增：处理 .tar.gz 数据集 ---------------------------------
@@ -133,6 +137,48 @@ def main(args):
     # 量化模型可能需要更小的学习率
     optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
 
+    # 分阶段QAT主循环
+    start_epoch = 0
+    best_acc = 0.0
+    for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
+        print(f"\n=== QAT Stage {stage + 1}: {w_bit}bit ===")
+        model.set_quant_bit(w_bit, in_bit, out_bit)
+        # 可选：每阶段重置学习率调度器
+        lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
+        scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+        # 每阶段保存best权重
+        stage_best_acc = 0.0
+        for epoch in range(stage_epochs[stage]):
+            global_epoch = start_epoch + epoch
+            # 训练
+            train_loss, train_acc = train_one_epoch(model=model, optimizer=optimizer, data_loader=train_loader,
+                                                    device=device, epoch=global_epoch,
+                                                    use_mixed_precision=args.mixed_precision)
+            scheduler.step()
+            # 验证
+            val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=global_epoch)
+            # 记录日志
+            tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
+            tb_writer.add_scalar(tags[0], train_loss, global_epoch)
+            tb_writer.add_scalar(tags[1], train_acc, global_epoch)
+            tb_writer.add_scalar(tags[2], val_loss, global_epoch)
+            tb_writer.add_scalar(tags[3], val_acc, global_epoch)
+            tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], global_epoch)
+            # 每阶段定期保存检查点
+            if (epoch + 1) % 5 == 0:
+                torch.save(model.state_dict(), f"./weights/model-{global_epoch}.pth")
+            # 保存最佳
+            if val_acc > stage_best_acc:
+                stage_best_acc = val_acc
+                torch.save(model.state_dict(), f"./weights/best_model_stage{stage + 1}.pth")
+                print(f"Best model in stage {stage + 1} saved with accuracy: {stage_best_acc:.4f}")
+            if val_acc > best_acc:
+                best_acc = val_acc
+        print(f"Stage {stage + 1} finished. Best acc: {stage_best_acc:.4f}")
+        start_epoch += stage_epochs[stage]
+
+    print(f"Progressive QAT completed. Best validation accuracy: {best_acc:.4f}")
+    """
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
@@ -174,17 +220,19 @@ def main(args):
             print(f"Best model saved with accuracy: {best_acc:.4f}")
 
     print(f"Training completed. Best validation accuracy: {best_acc:.4f}")
+    """
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
-    parser.add_argument('--epochs', type=int, default=10)       # 量化模型可能需要更多轮次 10
-    parser.add_argument('--batch-size', type=int, default=8)    # 8
-    parser.add_argument('--lr', type=float, default=0.001)  # 更小的学习率 0.001
+    parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次 10
+    parser.add_argument('--batch-size', type=int, default=16)    # 8
+    parser.add_argument('--lr', type=float, default=0.00005)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
-    parser.add_argument('--mixed-precision', type=bool, default=True)
+    parser.add_argument('--mixed-precision', type=bool, default=False)
 
     # 数据集所在根目录
     # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
@@ -196,7 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth",
                         help='initial weights path')
     # 是否冻结权重
-    parser.add_argument('--freeze-layers', type=bool, default=False)
+    parser.add_argument('--freeze-layers', type=bool, default=True)
     parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
 
     opt = parser.parse_args()
