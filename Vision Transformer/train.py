@@ -232,7 +232,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=0.00005)  # 更小的学习率 0.001
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
-    parser.add_argument('--mixed-precision', type=bool, default=True)
+        parser.add_argument('--mixed-precision', type=bool, default=False)
 
     # 数据集所在根目录
     # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
