@@ -49,7 +49,7 @@ def main(args):
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
     # 图片预处理 （224x224x3大小，并进行其他预处理）
-    """
+
     data_transform = {
         "train": transforms.Compose([transforms.RandomResizedCrop(224),
                                      transforms.RandomHorizontalFlip(),
@@ -74,6 +74,8 @@ def main(args):
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
     }
+
+    """
 
     # 实例化训练数据集
     train_dataset = MyDataSet(images_path=train_images_path,
@@ -139,8 +141,24 @@ def main(args):
     optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
     # optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
 
+    # ---- Warmup：先FP32训练 -----
+    print("==== Warmup FP32 Training (no quantization) ====")
+    model.set_quant_bit(32, 32, 32)
+    warmup_epochs = 10  # 可根据实际情况设为10~20
+    for epoch in range(warmup_epochs):
+        train_loss, train_acc = train_one_epoch(
+            model=model,
+            optimizer=optimizer,
+            data_loader=train_loader,
+            device=device,
+            epoch=epoch,
+            use_mixed_precision=args.mixed_precision,
+        )
+        val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
+        print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
+
     # 分阶段QAT主循环
-    start_epoch = 0
+    start_epoch = warmup_epochs  # QAT分阶段从warmup后开始计数
     best_acc = 0.0
     for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
         print(f"\n=== QAT Stage {stage + 1}: {w_bit}bit ===")
