@@ -1,0 +1,150 @@
+7300 images were found in the dataset.
+5845 images for training.
+1455 images for validation.
+Using 8 dataloader workers every process
+_IncompatibleKeys(missing_keys=['head.weight', 'head.bias'], unexpected_keys=[])
+==== Warmup FP32 Training (no quantization) ====
+[train epoch 0] loss: 2.525, acc: 0.354: 100%|██████████| 366/366 [01:00<00:00,  6.04it/s]
+[valid epoch 0] loss: 2.293, acc: 0.599: 100%|██████████| 91/91 [00:25<00:00,  3.58it/s]
+[FP32 warmup] epoch 0: train_acc=0.3538, val_acc=0.5986
+[train epoch 1] loss: 2.049, acc: 0.676: 100%|██████████| 366/366 [01:00<00:00,  6.08it/s]
+[valid epoch 1] loss: 1.718, acc: 0.764: 100%|██████████| 91/91 [00:25<00:00,  3.60it/s]
+[FP32 warmup] epoch 1: train_acc=0.6765, val_acc=0.7643
+[train epoch 2] loss: 1.535, acc: 0.753: 100%|██████████| 366/366 [01:00<00:00,  6.08it/s]
+[valid epoch 2] loss: 1.251, acc: 0.834: 100%|██████████| 91/91 [00:25<00:00,  3.55it/s]
+[FP32 warmup] epoch 2: train_acc=0.7530, val_acc=0.8344
+[train epoch 3] loss: 1.147, acc: 0.805: 100%|██████████| 366/366 [01:01<00:00,  5.99it/s]
+[valid epoch 3] loss: 0.913, acc: 0.860: 100%|██████████| 91/91 [00:26<00:00,  3.49it/s]
+[FP32 warmup] epoch 3: train_acc=0.8048, val_acc=0.8605
+[train epoch 4] loss: 0.907, acc: 0.829: 100%|██████████| 366/366 [01:01<00:00,  5.93it/s]
+[valid epoch 4] loss: 0.755, acc: 0.860: 100%|██████████| 91/91 [00:26<00:00,  3.42it/s]
+[FP32 warmup] epoch 4: train_acc=0.8287, val_acc=0.8605
+
+==== Sweep 0: head+MLP ====
+
+=== QAT Stage 1 (8bit, head+MLP) ===
+[train epoch 5] loss: 3.699, acc: 0.217: 100%|██████████| 366/366 [01:17<00:00,  4.73it/s]
+[valid epoch 5] loss: 2.293, acc: 0.342: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.3423
+[train epoch 6] loss: 2.196, acc: 0.352: 100%|██████████| 366/366 [01:17<00:00,  4.75it/s]
+[valid epoch 6] loss: 1.905, acc: 0.414: 100%|██████████| 91/91 [00:28<00:00,  3.21it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.4144
+[train epoch 7] loss: 1.889, acc: 0.430: 100%|██████████| 366/366 [01:17<00:00,  4.73it/s]
+[valid epoch 7] loss: 1.702, acc: 0.474: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.4735
+[train epoch 8] loss: 1.728, acc: 0.477: 100%|██████████| 366/366 [01:16<00:00,  4.76it/s]
+[valid epoch 8] loss: 1.544, acc: 0.500: 100%|██████████| 91/91 [00:28<00:00,  3.24it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.4997
+[train epoch 9] loss: 1.606, acc: 0.524: 100%|██████████| 366/366 [01:16<00:00,  4.77it/s]
+[valid epoch 9] loss: 1.456, acc: 0.537: 100%|██████████| 91/91 [00:27<00:00,  3.26it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.5368
+[train epoch 10] loss: 1.530, acc: 0.531: 100%|██████████| 366/366 [01:15<00:00,  4.82it/s]
+[valid epoch 10] loss: 1.369, acc: 0.577: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.5773
+[train epoch 11] loss: 1.441, acc: 0.561: 100%|██████████| 366/366 [01:17<00:00,  4.73it/s]
+[valid epoch 11] loss: 1.323, acc: 0.590: 100%|██████████| 91/91 [00:28<00:00,  3.24it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.5897
+[train epoch 12] loss: 1.387, acc: 0.574: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 12] loss: 1.295, acc: 0.605: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.6048
+[train epoch 13] loss: 1.383, acc: 0.583: 100%|██████████| 366/366 [01:16<00:00,  4.79it/s]
+[valid epoch 13] loss: 1.272, acc: 0.610: 100%|██████████| 91/91 [00:27<00:00,  3.25it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.6096
+[train epoch 14] loss: 1.341, acc: 0.596: 100%|██████████| 366/366 [01:16<00:00,  4.81it/s]
+[valid epoch 14] loss: 1.268, acc: 0.614: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 1) saved with accuracy: 0.6144
+Stage 1 (head+MLP) finished. Best acc: 0.6144
+
+=== QAT Stage 2 (6bit, head+MLP) ===
+[train epoch 15] loss: 1.465, acc: 0.555: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 15] loss: 1.232, acc: 0.620: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.6199
+[train epoch 16] loss: 1.289, acc: 0.602: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 16] loss: 1.113, acc: 0.668: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.6680
+[train epoch 17] loss: 1.193, acc: 0.638: 100%|██████████| 366/366 [01:16<00:00,  4.81it/s]
+[valid epoch 17] loss: 1.007, acc: 0.688: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.6880
+[train epoch 18] loss: 1.116, acc: 0.660: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 18] loss: 0.955, acc: 0.700: 100%|██████████| 91/91 [00:28<00:00,  3.24it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.6997
+[train epoch 19] loss: 1.076, acc: 0.670: 100%|██████████| 366/366 [01:16<00:00,  4.78it/s]
+[valid epoch 19] loss: 0.918, acc: 0.719: 100%|██████████| 91/91 [00:27<00:00,  3.28it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.7189
+[train epoch 20] loss: 1.033, acc: 0.683: 100%|██████████| 366/366 [01:16<00:00,  4.79it/s]
+[valid epoch 20] loss: 0.874, acc: 0.722: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.7223
+[train epoch 21] loss: 0.968, acc: 0.704: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 21] loss: 0.863, acc: 0.735: 100%|██████████| 91/91 [00:27<00:00,  3.26it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.7354
+[train epoch 22] loss: 0.952, acc: 0.712: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 22] loss: 0.830, acc: 0.752: 100%|██████████| 91/91 [00:27<00:00,  3.25it/s]
+Best model (head+MLP Stage 2) saved with accuracy: 0.7519
+[train epoch 23] loss: 0.925, acc: 0.718: 100%|██████████| 366/366 [01:16<00:00,  4.79it/s]
+[valid epoch 23] loss: 0.822, acc: 0.740: 100%|██████████| 91/91 [00:27<00:00,  3.27it/s]
+[train epoch 24] loss: 0.933, acc: 0.713: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 24] loss: 0.820, acc: 0.744: 100%|██████████| 91/91 [00:27<00:00,  3.27it/s]
+Stage 2 (head+MLP) finished. Best acc: 0.7519
+
+=== QAT Stage 3 (4bit, head+MLP) ===
+[train epoch 25] loss: 2.032, acc: 0.395: 100%|██████████| 366/366 [01:15<00:00,  4.82it/s]
+[valid epoch 25] loss: 1.588, acc: 0.507: 100%|██████████| 91/91 [00:27<00:00,  3.26it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.5065
+[train epoch 26] loss: 1.562, acc: 0.516: 100%|██████████| 366/366 [01:16<00:00,  4.81it/s]
+[valid epoch 26] loss: 1.360, acc: 0.581: 100%|██████████| 91/91 [00:27<00:00,  3.28it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.5808
+[train epoch 27] loss: 1.451, acc: 0.547: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 27] loss: 1.266, acc: 0.610: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6096
+[train epoch 28] loss: 1.329, acc: 0.594: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 28] loss: 1.176, acc: 0.639: 100%|██████████| 91/91 [00:28<00:00,  3.24it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6392
+[train epoch 29] loss: 1.239, acc: 0.620: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 29] loss: 1.133, acc: 0.650: 100%|██████████| 91/91 [00:27<00:00,  3.27it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6502
+[train epoch 30] loss: 1.193, acc: 0.630: 100%|██████████| 366/366 [01:16<00:00,  4.81it/s]
+[valid epoch 30] loss: 1.091, acc: 0.666: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6660
+[train epoch 31] loss: 1.164, acc: 0.639: 100%|██████████| 366/366 [01:17<00:00,  4.72it/s]
+[valid epoch 31] loss: 1.056, acc: 0.678: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6777
+[train epoch 32] loss: 1.110, acc: 0.663: 100%|██████████| 366/366 [01:16<00:00,  4.76it/s]
+[valid epoch 32] loss: 1.033, acc: 0.679: 100%|██████████| 91/91 [00:28<00:00,  3.17it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6790
+[train epoch 33] loss: 1.090, acc: 0.666: 100%|██████████| 366/366 [01:16<00:00,  4.81it/s]
+[valid epoch 33] loss: 1.023, acc: 0.689: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP Stage 3) saved with accuracy: 0.6887
+[train epoch 34] loss: 1.114, acc: 0.660: 100%|██████████| 366/366 [01:16<00:00,  4.80it/s]
+[valid epoch 34] loss: 1.020, acc: 0.685: 100%|██████████| 91/91 [00:28<00:00,  3.24it/s]
+Stage 3 (head+MLP) finished. Best acc: 0.6887
+Progressive QAT completed. Best validation accuracy: 0.7519
+
+==== Sweep 1: head+MLP+last1Attn ====
+
+=== QAT Stage 1 (8bit, head+MLP+last1Attn) ===
+[train epoch 5] loss: 4.873, acc: 0.270: 100%|██████████| 366/366 [01:17<00:00,  4.75it/s]
+[valid epoch 5] loss: 3.049, acc: 0.364: 100%|██████████| 91/91 [00:28<00:00,  3.22it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.3636
+[train epoch 6] loss: 2.977, acc: 0.362: 100%|██████████| 366/366 [01:17<00:00,  4.74it/s]
+[valid epoch 6] loss: 2.570, acc: 0.409: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.4089
+[train epoch 7] loss: 2.488, acc: 0.407: 100%|██████████| 366/366 [01:17<00:00,  4.73it/s]
+[valid epoch 7] loss: 2.151, acc: 0.468: 100%|██████████| 91/91 [00:28<00:00,  3.21it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.4680
+[train epoch 8] loss: 2.130, acc: 0.449: 100%|██████████| 366/366 [01:17<00:00,  4.70it/s]
+[valid epoch 8] loss: 1.889, acc: 0.493: 100%|██████████| 91/91 [00:28<00:00,  3.22it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.4935
+[train epoch 9] loss: 1.986, acc: 0.470: 100%|██████████| 366/366 [01:17<00:00,  4.70it/s]
+[valid epoch 9] loss: 1.742, acc: 0.522: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.5223
+[train epoch 10] loss: 1.828, acc: 0.492: 100%|██████████| 366/366 [01:17<00:00,  4.70it/s]
+[valid epoch 10] loss: 1.617, acc: 0.540: 100%|██████████| 91/91 [00:28<00:00,  3.23it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.5402
+[train epoch 11] loss: 1.709, acc: 0.515: 100%|██████████| 366/366 [01:17<00:00,  4.72it/s]
+[valid epoch 11] loss: 1.600, acc: 0.541: 100%|██████████| 91/91 [00:28<00:00,  3.25it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.5409
+[train epoch 12] loss: 1.682, acc: 0.524: 100%|██████████| 366/366 [01:18<00:00,  4.66it/s]
+[valid epoch 12] loss: 1.550, acc: 0.557: 100%|██████████| 91/91 [00:28<00:00,  3.16it/s]
+Best model (head+MLP+last1Attn Stage 1) saved with accuracy: 0.5574
+[train epoch 13] loss: 1.590, acc: 0.545: 100%|██████████| 366/366 [01:18<00:00,  4.67it/s]
+[valid epoch 13] loss: 1.527, acc: 0.558: 100%|██████████| 91/91 [00:28<00:00,  3.21it/s]
