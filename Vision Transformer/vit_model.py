@@ -115,13 +115,22 @@ class QuantizedPatchEmbed(nn.Module):
         return x
 
     def set_quant_bit(self, w_bit, in_bit, out_bit):
+        # 保存原有权重
+        Conv2d_Q = quant.conv2d_Q_fn(w_bit=w_bit)
+        old_proj_weight = self.proj.weight.data.detach().clone()
+        old_proj_bias = self.proj.bias.data.detach().clone() if self.proj.bias is not None else None
+
+        self.proj = Conv2d_Q(self.proj.in_channels, self.proj.out_channels,
+                             kernel_size=self.proj.kernel_size, stride=self.proj.stride)
+        self.proj.weight.data.copy_(old_proj_weight)
+        if old_proj_bias is not None:
+            self.proj.bias.data.copy_(old_proj_bias)
+
+        # 激活量化刷新
         self.w_bit = w_bit
         self.in_bit = in_bit
         self.out_bit = out_bit
-        Conv2d_Q = quant.conv2d_Q_fn(w_bit=self.w_bit)
-        self.proj = Conv2d_Q(self.proj.in_channels, self.proj.out_channels,
-                             kernel_size=self.proj.kernel_size, stride=self.proj.stride)
-        self.act_quant = quant.activation_quantize_fn(a_bit=self.out_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 
 class PatchEmbed(nn.Module):
@@ -290,8 +299,23 @@ class QuantizedAttention(nn.Module):
 
     def set_quant_bit(self, w_bit, in_bit, out_bit):
         Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        # 备份原qkv和proj权重
+        old_qkv_weight = self.qkv.weight.data.detach().clone()
+        old_qkv_bias = self.qkv.bias.data.detach().clone() if self.qkv.bias is not None else None
+        old_proj_weight = self.proj.weight.data.detach().clone()
+        old_proj_bias = self.proj.bias.data.detach().clone() if self.proj.bias is not None else None
+
+        # 新建量化层
         self.qkv = Linear_Q(self.qkv.in_features, self.qkv.out_features, bias=self.qkv.bias is not None)
         self.proj = Linear_Q(self.proj.in_features, self.proj.out_features, bias=self.proj.bias is not None)
+        # 拷贝参数
+        self.qkv.weight.data.copy_(old_qkv_weight)
+        if old_qkv_bias is not None:
+            self.qkv.bias.data.copy_(old_qkv_bias)
+        self.proj.weight.data.copy_(old_proj_weight)
+        if old_proj_bias is not None:
+            self.proj.bias.data.copy_(old_proj_bias)
+
         self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
         self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
@@ -354,8 +378,21 @@ class QuantizedMlp(nn.Module):
 
     def set_quant_bit(self, w_bit, in_bit, out_bit):
         Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        # 备份参数
+        old_fc1_weight = self.fc1.weight.data.detach().clone()
+        old_fc1_bias = self.fc1.bias.data.detach().clone() if self.fc1.bias is not None else None
+        old_fc2_weight = self.fc2.weight.data.detach().clone()
+        old_fc2_bias = self.fc2.bias.data.detach().clone() if self.fc2.bias is not None else None
+
         self.fc1 = Linear_Q(self.fc1.in_features, self.fc1.out_features, bias=self.fc1.bias is not None)
         self.fc2 = Linear_Q(self.fc2.in_features, self.fc2.out_features, bias=self.fc2.bias is not None)
+        self.fc1.weight.data.copy_(old_fc1_weight)
+        if old_fc1_bias is not None:
+            self.fc1.bias.data.copy_(old_fc1_bias)
+        self.fc2.weight.data.copy_(old_fc2_weight)
+        if old_fc2_bias is not None:
+            self.fc2.bias.data.copy_(old_fc2_bias)
+
         self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 class Block(nn.Module):
@@ -444,7 +481,6 @@ class QuantizedBlock(nn.Module):
         self.attn.set_quant_bit(w_bit, in_bit, out_bit)
         self.mlp.set_quant_bit(w_bit, in_bit, out_bit)
         self.residual_quant = quant.activation_quantize_fn(a_bit=out_bit)
-
 
 class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_c=3, num_classes=1000,
@@ -700,12 +736,39 @@ class QuantizedVisionTransformer(nn.Module):
         self.patch_embed.set_quant_bit(w_bit, in_bit, out_bit)
         for m in self.blocks:
             m.set_quant_bit(w_bit, in_bit, out_bit)
-        if hasattr(self, 'pre_logits') and hasattr(self.pre_logits[0], 'set_quant_bit'):
-            self.pre_logits[0].set_quant_bit(w_bit)
+        # pre_logits如果是Linear_Q也要拷贝
+        if hasattr(self, 'pre_logits') and isinstance(self.pre_logits, nn.Sequential):
+            if hasattr(self.pre_logits[0], 'set_quant_bit'):
+                # 拷贝pre_logits[0]参数
+                old_fc_weight = self.pre_logits[0].weight.data.detach().clone()
+                old_fc_bias = self.pre_logits[0].bias.data.detach().clone() if self.pre_logits[
+                                                                                   0].bias is not None else None
+                Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+                self.pre_logits[0] = Linear_Q(self.pre_logits[0].in_features, self.pre_logits[0].out_features,
+                                              bias=self.pre_logits[0].bias is not None)
+                self.pre_logits[0].weight.data.copy_(old_fc_weight)
+                if old_fc_bias is not None:
+                    self.pre_logits[0].bias.data.copy_(old_fc_bias)
+        # head
         if hasattr(self.head, 'set_quant_bit'):
-            self.head.set_quant_bit(w_bit)
-        if hasattr(self.head_dist, 'set_quant_bit'):
-            self.head_dist.set_quant_bit(w_bit)
+            # 拷贝head参数
+            old_head_weight = self.head.weight.data.detach().clone()
+            old_head_bias = self.head.bias.data.detach().clone() if self.head.bias is not None else None
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head = Linear_Q(self.head.in_features, self.head.out_features, bias=self.head.bias is not None)
+            self.head.weight.data.copy_(old_head_weight)
+            if old_head_bias is not None:
+                self.head.bias.data.copy_(old_head_bias)
+        # head_dist
+        if hasattr(self, 'head_dist') and hasattr(self.head_dist, 'set_quant_bit'):
+            old_head_dist_weight = self.head_dist.weight.data.detach().clone()
+            old_head_dist_bias = self.head_dist.bias.data.detach().clone() if self.head_dist.bias is not None else None
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head_dist = Linear_Q(self.head_dist.in_features, self.head_dist.out_features,
+                                      bias=self.head_dist.bias is not None)
+            self.head_dist.weight.data.copy_(old_head_dist_weight)
+            if old_head_dist_bias is not None:
+                self.head_dist.bias.data.copy_(old_head_dist_bias)
 
 
 def _init_vit_weights(m):
