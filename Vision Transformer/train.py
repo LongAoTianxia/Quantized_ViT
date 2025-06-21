@@ -158,91 +158,79 @@ def main(args):
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
 
+    # ====== Progressive Quantization Sweep ======
+    n_blocks = len(model.blocks)
+    mlp_blocks = list(range(n_blocks))  # 通常全部量化MLP
+
+    # 定义想测试的逐步量化Attention的Block索引：只量化head+MLP→量化最后1个Block的Attn→最后2个Block的Attn→全Attn
+    quantize_attn_sweep = [
+        [],  # 只量化MLP
+        [n_blocks - 1],  # 只量化最后1个Block的Attention
+        list(range(n_blocks - 2, n_blocks)),  # 只量化最后2个Block的Attention
+        list(range(n_blocks - 4, n_blocks)),  # 量化最后4个Block的Attention
+        list(range(n_blocks)),  # 全部Block的Attention都量化
+    ]
     # 分阶段QAT主循环
     start_epoch = warmup_epochs  # QAT分阶段从warmup后开始计数
-    best_acc = 0.0
-    for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
-        print(f"\n=== QAT Stage {stage + 1}: {w_bit}bit ===")
-        model.set_quant_bit(w_bit, in_bit, out_bit, only_head_mlp=True) # 仅对MLP Head进行量化
-        qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
-        # 可选：每阶段重置学习率调度器
-        lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
-        scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
-        # 每阶段保存best权重
-        stage_best_acc = 0.0
-        for epoch in range(stage_epochs[stage]):
-            global_epoch = start_epoch + epoch
-            # 训练
-            train_loss, train_acc = train_one_epoch(model=model, optimizer=qat_optimizer, data_loader=train_loader,
-                                                    device=device, epoch=global_epoch,
-                                                    use_mixed_precision=args.mixed_precision)
-            scheduler.step()
-            # 验证
-            val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=global_epoch)
-            # 记录日志
-            tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
-            tb_writer.add_scalar(tags[0], train_loss, global_epoch)
-            tb_writer.add_scalar(tags[1], train_acc, global_epoch)
-            tb_writer.add_scalar(tags[2], val_loss, global_epoch)
-            tb_writer.add_scalar(tags[3], val_acc, global_epoch)
-            tb_writer.add_scalar(tags[4], qat_optimizer.param_groups[0]["lr"], global_epoch)
-            # 每阶段定期保存检查点
-            if (epoch + 1) % 5 == 0:
-                torch.save(model.state_dict(), f"./weights/model-{global_epoch}.pth")
-            # 保存最佳
-            if val_acc > stage_best_acc:
-                stage_best_acc = val_acc
-                torch.save(model.state_dict(), f"./weights/best_model_stage{stage + 1}.pth")
-                print(f"Best model in stage {stage + 1} saved with accuracy: {stage_best_acc:.4f}")
-            if val_acc > best_acc:
-                best_acc = val_acc
-        print(f"Stage {stage + 1} finished. Best acc: {stage_best_acc:.4f}")
-        start_epoch += stage_epochs[stage]
+    overall_best_acc = 0.0
 
-    print(f"Progressive QAT completed. Best validation accuracy: {best_acc:.4f}")
-    """
-    # Scheduler https://arxiv.org/pdf/1812.01187.pdf
-    lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf  # cosine
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    for attn_blocks in quantize_attn_sweep:
+        print(f"\n==== 量化MLP + Attention Blocks: {attn_blocks} ====")
+        # 重新加载一份模型参数（可选，保证每次量化起点一致，每次从warmup后的参数继续）
+        # model.load_state_dict(torch.load('warmup_model.pth'))
 
-    best_acc = 0.0
-    for epoch in range(args.epochs):
-        # 训练
-        train_loss, train_acc = train_one_epoch(model=model,
-                                                optimizer=optimizer,
-                                                data_loader=train_loader,
-                                                device=device,
-                                                epoch=epoch,
-                                                use_mixed_precision=args.mixed_precision)
+        # 分bit stage量化
+        start_epoch = warmup_epochs
+        best_acc = 0.0
+        for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
+            print(f"\n=== QAT Stage {stage + 1}: {w_bit}bit Attention Blocks: {attn_blocks} ===")
+            model.set_quant_bit(
+                w_bit=w_bit, in_bit=in_bit, out_bit=out_bit,
+                quantize_head=True,
+                quantize_attn_blocks=attn_blocks,
+                quantize_mlp_blocks=mlp_blocks,
+                quantize_patch_embed=False
+            )
+            qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
+            # 可选：每阶段重置学习率调度器
+            lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
+            scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
+            # 每阶段保存best权重
+            stage_best_acc = 0.0
+            for epoch in range(stage_epochs[stage]):
+                global_epoch = start_epoch + epoch
+                # 训练
+                train_loss, train_acc = train_one_epoch(model=model, optimizer=qat_optimizer, data_loader=train_loader,
+                                                        device=device, epoch=global_epoch,
+                                                        use_mixed_precision=args.mixed_precision)
+                scheduler.step()
+                # 验证
+                val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=global_epoch)
+                # 记录日志
+                tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
+                tb_writer.add_scalar(tags[0], train_loss, global_epoch)
+                tb_writer.add_scalar(tags[1], train_acc, global_epoch)
+                tb_writer.add_scalar(tags[2], val_loss, global_epoch)
+                tb_writer.add_scalar(tags[3], val_acc, global_epoch)
+                tb_writer.add_scalar(tags[4], qat_optimizer.param_groups[0]["lr"], global_epoch)
+                # 每阶段定期保存检查点
+                if (epoch + 1) % 5 == 0:
+                    torch.save(model.state_dict(), f"./weights/model-attn{attn_blocks}-stage{stage+1}-epoch{global_epoch}.pth")
+                # 保存最佳
+                if val_acc > stage_best_acc:
+                    stage_best_acc = val_acc
+                    torch.save(model.state_dict(), f"./weights/best_model-attn{attn_blocks}-stage{stage + 1}.pth")
+                    print(
+                        f"Best model (Attn {attn_blocks} Stage {stage + 1}) saved with accuracy: {stage_best_acc:.4f}")
+                if val_acc > best_acc:
+                    best_acc = val_acc
+                if val_acc > overall_best_acc:
+                    overall_best_acc = val_acc
+            print(f"Stage {stage + 1} (Attn {attn_blocks}) finished. Best acc: {stage_best_acc:.4f}")
+            start_epoch += stage_epochs[stage]
+        print(f"==== Sweep Block {attn_blocks} finished. Best acc: {best_acc:.4f}")
 
-        scheduler.step()
-
-        # 验证
-        val_loss, val_acc = evaluate(model=model,
-                                     data_loader=val_loader,
-                                     device=device,
-                                     epoch=epoch)
-
-        # 记录日志
-        tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
-        tb_writer.add_scalar(tags[0], train_loss, epoch)
-        tb_writer.add_scalar(tags[1], train_acc, epoch)
-        tb_writer.add_scalar(tags[2], val_loss, epoch)
-        tb_writer.add_scalar(tags[3], val_acc, epoch)
-        tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
-
-        # 定期保存检查点
-        if (epoch + 1) % 5 ==0:
-            torch.save(model.state_dict(), "./weights/model-{}.pth".format(epoch))
-
-        # 保存最佳模型
-        if val_acc > best_acc:
-            best_acc = val_acc
-            torch.save(model.state_dict(), "./weights/best_model.pth")
-            print(f"Best model saved with accuracy: {best_acc:.4f}")
-
-    print(f"Training completed. Best validation accuracy: {best_acc:.4f}")
-    """
+    print(f"Progressive QAT + Block Sweep completed. Overall Best validation accuracy: {overall_best_acc:.4f}")
 
 
 
