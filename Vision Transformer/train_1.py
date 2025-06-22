@@ -138,15 +138,15 @@ def main(args):
     optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
     # optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
 
-    n_blocks = len(model.blocks)
+    n_blocks = len(model.blocks) # 12
     mlp_blocks = list(range(n_blocks))
     # ---- Warmup：先FP32训练 -----
     print("==== Warmup FP32 Training (no quantization) ====")
     model.set_quant_bit(32, 32, 32, quantize_head=True, quantize_patch_embed=True,
                         quantize_attn_blocks=list(range(n_blocks)),
                         quantize_mlp_blocks=mlp_blocks)
-    warmup_epochs = 5  # 可根据实际情况设为10~20
-    warmup_optimizer = torch.optim.AdamW(pg, lr=0.001, weight_decay=args.weight_decay)
+    warmup_epochs = 3  # 可根据实际情况设为10~20
+    warmup_optimizer = torch.optim.AdamW(pg, lr=0.002, weight_decay=args.weight_decay)
     for epoch in range(warmup_epochs):
         train_loss, train_acc = train_one_epoch(
             model=model,
@@ -157,6 +157,7 @@ def main(args):
             use_mixed_precision=args.mixed_precision,
         )
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
+        torch.save(model.state_dict(), f"./weights/warmup.pth")
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
 
     # ========== 量化配置Sweep ==========
@@ -165,16 +166,24 @@ def main(args):
         ("head+MLP", True, False, [], mlp_blocks),
         ("head+MLP+last1Attn", True, False, [n_blocks - 1], mlp_blocks),
         ("head+MLP+last2Attn", True, False, list(range(n_blocks - 2, n_blocks)), mlp_blocks),
+        ("head+MLP+last3Attn", True, False, list(range(n_blocks - 3, n_blocks)), mlp_blocks),
         ("head+MLP+last4Attn", True, False, list(range(n_blocks - 4, n_blocks)), mlp_blocks),
+        ("head+MLP+last5Attn", True, False, list(range(n_blocks - 5, n_blocks)), mlp_blocks),
+        ("head+MLP+last6Attn", True, False, list(range(n_blocks - 6, n_blocks)), mlp_blocks),
+        ("head+MLP+last7Attn", True, False, list(range(n_blocks - 7, n_blocks)), mlp_blocks),
+        ("head+MLP+last8Attn", True, False, list(range(n_blocks - 8, n_blocks)), mlp_blocks),
+        ("head+MLP+last9Attn", True, False, list(range(n_blocks - 9, n_blocks)), mlp_blocks),
+        ("head+MLP+last10Attn", True, False, list(range(n_blocks - 10, n_blocks)), mlp_blocks),
+        ("head+MLP+last11Attn", True, False, list(range(n_blocks - 11, n_blocks)), mlp_blocks),
         ("head+MLP+allAttn", True, False, list(range(n_blocks)), mlp_blocks),
         ("all-main", True, True, list(range(n_blocks)), mlp_blocks),  # 全主干量化
     ]
     # 定义分阶段QAT的bit宽度设置
     bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
     # stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
-    stage_epochs = [10, 10, args.epochs - 20]
+    stage_epochs = [8, 10, 12]
     for sweep_idx, (desc, quantize_head, quantize_patch_embed, attn_blocks, mlp_blocks_) in enumerate(sweep_configs):
-        # 共6层
+        # 共14层
         print(f"\n==== Sweep {sweep_idx}: {desc} ====")
         # 每轮建议重新加载warmup后参数
         # torch.save(model.state_dict(), "./weights/warmup_model.pth")
@@ -192,6 +201,12 @@ def main(args):
                 quantize_attn_blocks=attn_blocks,
                 quantize_mlp_blocks=mlp_blocks_
             )
+            if w_bit == 8:
+                args.lr = 0.0008
+            elif w_bit == 6:
+                args.lr = 0.0005  # 调低
+            elif w_bit == 4:
+                args.lr = 0.0003    # 调高
             qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
             # 可选：每阶段重置学习率调度器
             lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
@@ -215,8 +230,8 @@ def main(args):
                 tb_writer.add_scalar(tags[3], val_acc, global_epoch)
                 tb_writer.add_scalar(tags[4], qat_optimizer.param_groups[0]["lr"], global_epoch)
                 # 每阶段定期保存检查点
-                if (epoch + 1) % 5 == 0:
-                    torch.save(model.state_dict(), f"./weights/model-{desc}-stage{stage+1}-epoch{global_epoch}.pth")
+                # if (epoch + 1) % 5 == 0:
+                #     torch.save(model.state_dict(), f"./weights/model-{desc}-stage{stage+1}-epoch{global_epoch}.pth")
                 # 保存最佳
                 if val_acc > stage_best_acc:
                     stage_best_acc = val_acc
@@ -237,9 +252,9 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
-    parser.add_argument('--epochs', type=int, default=30)       # 量化模型可能需要更多轮次 10
+    parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次(模型内具体修改)
     parser.add_argument('--batch-size', type=int, default=16)    # 8
-    parser.add_argument('--lr', type=float, default=0.0002)  # 更小的学习率 0.001
+    parser.add_argument('--lr', type=float, default=0.0003)  # 更小的学习率 0.001 (模型内具体修改)
     parser.add_argument('--lrf', type=float, default=0.01)
     parser.add_argument('--weight-decay', type=float, default=0.05)
     parser.add_argument('--mixed-precision', type=bool, default=True)
