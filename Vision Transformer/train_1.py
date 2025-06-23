@@ -45,15 +45,15 @@ def main(args):
 
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
-    # 图片预处理 （224x224x3大小，并进行其他预处理）
+    # 图片预处理 （224x224x3大小，并进行其他预处理） 数据集图像应大于224x224
 
     data_transform = {
-        "train": transforms.Compose([transforms.RandomResizedCrop(224),
-                                     transforms.RandomHorizontalFlip(),
-                                     transforms.ToTensor(),
+        "train": transforms.Compose([transforms.RandomResizedCrop(224),  # 随机裁剪一块面积和宽高比随机的区域，并将其缩放到224x224,增加数据多样性，防止模型过拟合
+                                     transforms.RandomHorizontalFlip(),  # 随机水平翻转
+                                     transforms.ToTensor(),  # 转换为Tensor
                                      transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
-        "val": transforms.Compose([transforms.Resize(256),
-                                   transforms.CenterCrop(224),
+        "val": transforms.Compose([transforms.Resize(256),  # 调整图片大小为256x256
+                                   transforms.CenterCrop(224),  # 中心裁剪224x224大小
                                    transforms.ToTensor(),
                                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])}
     """
@@ -157,8 +157,8 @@ def main(args):
             use_mixed_precision=args.mixed_precision,
         )
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
-        torch.save(model.state_dict(), f"./weights/warmup.pth")
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
+    torch.save(model.state_dict(), "./weights/FP32_warmup.pth")  # 保存warmup后的模型
 
     # ========== 量化配置Sweep ==========
     sweep_configs = [
@@ -181,7 +181,7 @@ def main(args):
     # 定义分阶段QAT的bit宽度设置
     bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
     # stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
-    stage_epochs = [8, 10, 12]
+    stage_epochs = [9, 12, 15]
     for sweep_idx, (desc, quantize_head, quantize_patch_embed, attn_blocks, mlp_blocks_) in enumerate(sweep_configs):
         # 共14层
         print(f"\n==== Sweep {sweep_idx}: {desc} ====")
@@ -190,7 +190,7 @@ def main(args):
         # model.load_state_dict(torch.load("./weights/warmup_model.pth"))
         best_acc = 0.0
         # 分阶段QAT主循环
-        start_epoch = warmup_epochs  # QAT分阶段从warmup后开始计数
+        start_epoch = 0
         for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
             # 共3层 8bit, 6bit, 4bit
             print(f"\n=== QAT Stage {stage+1} ({w_bit}bit, {desc}) ===")
@@ -202,14 +202,14 @@ def main(args):
                 quantize_mlp_blocks=mlp_blocks_
             )
             if w_bit == 8:
-                args.lr = 0.0008
+                args.lr = 0.0009  # 调高
             elif w_bit == 6:
-                args.lr = 0.0005  # 调低
+                args.lr = 0.00045  # 调低
             elif w_bit == 4:
-                args.lr = 0.0003    # 调高
+                args.lr = 0.00035    # 调低
             qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
-            # 可选：每阶段重置学习率调度器
-            lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # cosine
+            # 可选：每阶段重置学习率调度器    Scheduler https://arxiv.org/pdf/1812.01187.pdf
+            lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # Cosine学习率调度
             scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
             # 每阶段保存best权重
             stage_best_acc = 0.0
