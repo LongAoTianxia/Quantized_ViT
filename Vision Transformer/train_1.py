@@ -156,7 +156,7 @@ def main(args):
 
     n_blocks = len(model.blocks) # 12
     mlp_blocks = list(range(n_blocks))
-    """
+
     # ========== Warmup：先FP32训练 ==========
     print("==== Warmup FP32 Training (no quantization) ====")
     model.set_quant_bit(32, 32, 32, quantize_head=True, quantize_patch_embed=True,
@@ -167,16 +167,18 @@ def main(args):
     for epoch in range(warmup_epochs):
         train_loss, train_acc = train_one_epoch(
             model=model,
+            teacher_model=teacher_model,  # FP32模型
             optimizer=warmup_optimizer,
             data_loader=train_loader,
             device=device,
             epoch=epoch,
             use_mixed_precision=args.mixed_precision,
+            alpha=0.7,  temperature=2.0
         )
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
     torch.save(model.state_dict(), "./weights/FP32_warmup.pth")  # 保存warmup后的模型
-    """
+
     # ========== 量化配置Sweep ==========
     sweep_configs = [
         # 量化范围配置: (描述, quantize_head, quantize_patch_embed, quantize_attn_blocks, quantize_mlp_blocks)
@@ -195,6 +197,21 @@ def main(args):
         ("head+MLP+allAttn", True, False, list(range(n_blocks)), mlp_blocks),
         ("all-main", True, True, list(range(n_blocks)), mlp_blocks),  # 全主干量化
     ]
+    # 针对每个量化配置，设定训练轮数和初始学习率
+    sweep_hyperparams = {
+        "head+MLP": {"epochs": 8, "lr": 9e-4},
+        "head+MLP+last1Attn": {"epochs": 10, "lr": 8e-4},
+        "head+MLP+last2Attn": {"epochs": 12, "lr": 7e-4},
+        "head+MLP+last3Attn": {"epochs": 14, "lr": 6e-4},
+        "head+MLP+last4Attn": {"epochs": 16, "lr": 5e-4},
+        "head+MLP+last5Attn": {"epochs": 18, "lr": 4e-4},
+        "head+MLP+last6Attn": {"epochs": 20, "lr": 3e-4},
+        "head+MLP+last7Attn": {"epochs": 22, "lr": 2.5e-4},
+        "head+MLP+last8Attn": {"epochs": 24, "lr": 2e-4},
+        "head+MLP+last9Attn": {"epochs": 26, "lr": 1.5e-4},
+        "head+MLP+last10Attn": {"epochs": 28, "lr": 1e-4},
+        "head+MLP+allAttn": {"epochs": 32, "lr": 1e-4},
+    }
     # 定义分阶段QAT的bit宽度设置
     bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
     # stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
@@ -274,7 +291,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
     parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次(模型内具体修改)
-    parser.add_argument('--batch-size', type=int, default=32)    # 8
+    parser.add_argument('--batch-size', type=int, default=16)    # 8
     parser.add_argument('--lr', type=float, default=0.0003)  # 更小的学习率 0.001 (模型内具体修改)
     parser.add_argument('--lrf', type=float, default=0.01)  # 学习率衰减系数
     parser.add_argument('--weight-decay', type=float, default=0.05)  # 权重衰减
@@ -287,7 +304,7 @@ if __name__ == '__main__':
     parser.add_argument('--model-name', default='', help='create model name')
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/FP32_warmup.pth",
+    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth",
                         help='initial weights path')
     # 教师模型权重路径
     parser.add_argument('--teacher-weights', type=str,
