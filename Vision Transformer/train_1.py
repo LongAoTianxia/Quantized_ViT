@@ -12,6 +12,7 @@ from torchvision import transforms
 
 from my_dataset import MyDataSet
 from vit_model import vit_base_patch16_224_in21k_Qua as create_model
+from vit_model import vit_base_patch16_224_in21k as create_teacher_model  # teacher模型
 from utils import read_split_data, train_one_epoch, evaluate
 
 def extract_tar_gz(tar_path, extract_dir):
@@ -21,7 +22,6 @@ def extract_tar_gz(tar_path, extract_dir):
     print(f"Extracted dataset to: {extract_dir}")
 
 def main(args):
-
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     """
     # 新增：处理 .tar.gz 数据集 ---------------------------------
@@ -38,11 +38,27 @@ def main(args):
         args.data_path = temp_extract_dir  # 使用解压后的路径
     # ---------------------------------------------------------
     """
+    # ========== 创建教师模型 ==========
+    teacher_model = create_teacher_model(num_classes=args.num_classes, has_logits=False).to(device)
+    teacher_model.eval()
+    assert os.path.exists(args.teacher_weights), "teacher weights file not found!"
+    teacher_weights = torch.load(args.teacher_weights, map_location=device)
+    if 'model_state_dict' in teacher_weights:
+        # 如果是原始VIT权重，需要适配量化模型
+        teacher_model.load_state_dict(teacher_weights['model_state_dict'], strict=False)
+    else:
+        # 处理原始VIT权重
+        teacher_model.load_state_dict(teacher_weights, strict=False)
+    for p in teacher_model.parameters():
+        # 冻结教师模型参数
+        p.requires_grad = False
+    # ================================
     if os.path.exists("./weights") is False:
+        # 如果不存在weights目录，则创建
         os.makedirs("./weights")
-
+    # tensorboard日志目录
     tb_writer = SummaryWriter()
-
+    # 读取数据集
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
     # 图片预处理 （224x224x3大小，并进行其他预处理） 数据集图像应大于224x224
@@ -140,7 +156,8 @@ def main(args):
 
     n_blocks = len(model.blocks) # 12
     mlp_blocks = list(range(n_blocks))
-    # ---- Warmup：先FP32训练 -----
+    """
+    # ========== Warmup：先FP32训练 ==========
     print("==== Warmup FP32 Training (no quantization) ====")
     model.set_quant_bit(32, 32, 32, quantize_head=True, quantize_patch_embed=True,
                         quantize_attn_blocks=list(range(n_blocks)),
@@ -159,7 +176,7 @@ def main(args):
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
     torch.save(model.state_dict(), "./weights/FP32_warmup.pth")  # 保存warmup后的模型
-
+    """
     # ========== 量化配置Sweep ==========
     sweep_configs = [
         # 量化范围配置: (描述, quantize_head, quantize_patch_embed, quantize_attn_blocks, quantize_mlp_blocks)
@@ -181,7 +198,7 @@ def main(args):
     # 定义分阶段QAT的bit宽度设置
     bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
     # stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
-    stage_epochs = [9, 12, 15]
+    stage_epochs = [8, 10, 12]
     for sweep_idx, (desc, quantize_head, quantize_patch_embed, attn_blocks, mlp_blocks_) in enumerate(sweep_configs):
         # 共14层
         print(f"\n==== Sweep {sweep_idx}: {desc} ====")
@@ -216,9 +233,13 @@ def main(args):
             for epoch in range(stage_epochs[stage]):
                 global_epoch = start_epoch + epoch
                 # 训练
-                train_loss, train_acc = train_one_epoch(model=model, optimizer=qat_optimizer, data_loader=train_loader,
+                # 先粗调alpha，再微调temperature
+                # 精度提升很小，适当减少alpha; 过拟合/精度不稳定,大alpha
+                train_loss, train_acc = train_one_epoch(model=model, teacher_model=teacher_model,
+                                                        optimizer=qat_optimizer, data_loader=train_loader,
                                                         device=device, epoch=global_epoch,
-                                                        use_mixed_precision=args.mixed_precision)
+                                                        use_mixed_precision=args.mixed_precision,
+                                                        alpha=0.7, temperature=2.0)
                 scheduler.step()
                 # 验证
                 val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=global_epoch)
@@ -253,10 +274,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
     parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次(模型内具体修改)
-    parser.add_argument('--batch-size', type=int, default=16)    # 8
+    parser.add_argument('--batch-size', type=int, default=32)    # 8
     parser.add_argument('--lr', type=float, default=0.0003)  # 更小的学习率 0.001 (模型内具体修改)
-    parser.add_argument('--lrf', type=float, default=0.01)
-    parser.add_argument('--weight-decay', type=float, default=0.05)
+    parser.add_argument('--lrf', type=float, default=0.01)  # 学习率衰减系数
+    parser.add_argument('--weight-decay', type=float, default=0.05)  # 权重衰减
     parser.add_argument('--mixed-precision', type=bool, default=True)
 
     # 数据集所在根目录
@@ -266,8 +287,12 @@ if __name__ == '__main__':
     parser.add_argument('--model-name', default='', help='create model name')
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth",
+    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/FP32_warmup.pth",
                         help='initial weights path')
+    # 教师模型权重路径
+    parser.add_argument('--teacher-weights', type=str,
+                        default="D:/python/PycharmProjects/vision_transformer/weights/weightsSave/model-9_ball.pth",
+                        help='teacher weights path (FP32)')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
     parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
