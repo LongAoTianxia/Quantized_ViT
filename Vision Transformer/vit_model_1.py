@@ -762,29 +762,13 @@ class QuantizedVisionTransformer(nn.Module):
         # PatchEmbed
         if quantize_patch_embed and hasattr(self.patch_embed, 'set_quant_bit'):
             self.patch_embed.set_quant_bit(w_bit, in_bit, out_bit)
-        # 量化 Head
-        if quantize_head and hasattr(self.head, 'weight'):
-            old_head_weight = self.head.weight.data.detach().clone()
-            old_head_bias = self.head.bias.data.detach().clone() if self.head.bias is not None else None
-            old_head_device = self.head.weight.device
-            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
-            self.head = Linear_Q(self.head.in_features, self.head.out_features, bias=self.head.bias is not None)
-            self.head = self.head.to(old_head_device)
-            self.head.weight.data.copy_(old_head_weight)
-            if old_head_bias is not None:
-                self.head.bias.data.copy_(old_head_bias)
-        # 如果有 dist head，同理
-        if hasattr(self, 'head_dist') and hasattr(self.head_dist, 'weight'):
-            old_head_dist_weight = self.head_dist.weight.data.detach().clone()
-            old_head_dist_bias = self.head_dist.bias.data.detach().clone() if self.head_dist.bias is not None else None
-            old_head_dist_device = self.head_dist.weight.device
-            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
-            self.head_dist = Linear_Q(self.head_dist.in_features, self.head_dist.out_features,
-                                      bias=self.head_dist.bias is not None)
-            self.head_dist = self.head_dist.to(old_head_dist_device)
-            self.head_dist.weight.data.copy_(old_head_dist_weight)
-            if old_head_dist_bias is not None:
-                self.head_dist.bias.data.copy_(old_head_dist_bias)
+
+        # Blocks
+        for idx, block in enumerate(self.blocks):
+            quantize_attn = idx in quantize_attn_blocks
+            quantize_mlp = idx in quantize_mlp_blocks
+            block.set_quant_bit(w_bit, in_bit, out_bit, quantize_attn=quantize_attn, quantize_mlp=quantize_mlp)
+
         # pre_logits可选
         if hasattr(self, 'pre_logits') and isinstance(self.pre_logits, nn.Sequential):
             # 如果pre_logits是nn.Sequential，且第一个层是Linear
@@ -801,11 +785,31 @@ class QuantizedVisionTransformer(nn.Module):
                 self.pre_logits[0].weight.data.copy_(old_fc_weight)
                 if old_fc_bias is not None:
                     self.pre_logits[0].bias.data.copy_(old_fc_bias)
-        # Blocks
-        for idx, block in enumerate(self.blocks):
-            quantize_attn = idx in quantize_attn_blocks
-            quantize_mlp = idx in quantize_mlp_blocks
-            block.set_quant_bit(w_bit, in_bit, out_bit, quantize_attn=quantize_attn, quantize_mlp=quantize_mlp)
+
+        # 量化 Head
+        if quantize_head and hasattr(self.head, 'set_quant_bit'):
+            old_head_weight = self.head.weight.data.detach().clone()
+            old_head_bias = self.head.bias.data.detach().clone() if self.head.bias is not None else None
+            old_head_device = self.head.weight.device
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head = Linear_Q(self.head.in_features, self.head.out_features, bias=self.head.bias is not None)
+            self.head = self.head.to(old_head_device)
+            self.head.weight.data.copy_(old_head_weight)
+            if old_head_bias is not None:
+                self.head.bias.data.copy_(old_head_bias)
+
+        # 如果有 dist head，同理
+        if hasattr(self, 'head_dist') and hasattr(self.head_dist, 'set_quant_bit'):
+            old_head_dist_weight = self.head_dist.weight.data.detach().clone()
+            old_head_dist_bias = self.head_dist.bias.data.detach().clone() if self.head_dist.bias is not None else None
+            old_head_dist_device = self.head_dist.weight.device
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head_dist = Linear_Q(self.head_dist.in_features, self.head_dist.out_features,
+                                      bias=self.head_dist.bias is not None)
+            self.head_dist = self.head_dist.to(old_head_dist_device)
+            self.head_dist.weight.data.copy_(old_head_dist_weight)
+            if old_head_dist_bias is not None:
+                self.head_dist.bias.data.copy_(old_head_dist_bias)
 
 
 def _init_vit_weights(m):
