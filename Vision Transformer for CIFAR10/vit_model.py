@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import quant_ultra
+import quant
 
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
@@ -46,7 +46,7 @@ class DropPath(nn.Module):
 
 class QuantizedPatchEmbed(nn.Module):
     """
-    （新增）量化后PatchEmbed
+    量化后PatchEmbed
     通过卷积，将2D图片转成Patch序列的嵌入表示
     2D Image to Patch Embedding
     """
@@ -75,8 +75,7 @@ class QuantizedPatchEmbed(nn.Module):
         self.in_bit = in_bit
         self.out_bit = out_bit
         self.l_shift = l_shift
-        self.uniform_q = quant_ultra.uniform_quantize(k=self.w_bit - 1)  # 符号位 占一位
-        self.quantize_fn = quant_ultra.weight_quantize_fn(w_bit=self.w_bit)  # 权重量化器  weight_quantize_fn中 k = w_bit-1
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)  # 激活量化
 
         '''Patch Embedding'''
         # Aim: 将每一个Patch的矩阵拉伸成为一个1*768维度向量，从而获得近似词向量堆叠的效果
@@ -86,7 +85,8 @@ class QuantizedPatchEmbed(nn.Module):
         # 卷积核、步幅都是patch_size，可以确保每个卷积操作只处理一个patch,不重复
         # 输出通道数为embed_dim(768)，表示每个patch的嵌入向量维度
         # Quantized conv2d projector
-        self.proj = nn.Conv2d(in_c, embed_dim, kernel_size=patch_size, stride=patch_size)
+        Conv2d_Q = quant.conv2d_Q_fn(w_bit=self.w_bit)
+        self.proj = Conv2d_Q(in_c, embed_dim, kernel_size=patch_size, stride=patch_size)
 
         # 归一化层，用于对嵌入向量进行归一化
         # 提供了norm_layer，则使用该类型创建norm层，否则使用nn.Identity()作为默认的归一化层。
@@ -99,29 +99,40 @@ class QuantizedPatchEmbed(nn.Module):
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
 
-        # Quantize input
-        x_int = self.uniform_q(torch.clamp(x, 0, 1))
-        # x_int = torch.clamp(x * (2 ** self.in_bit - 1), 0, 2 ** self.in_bit - 1)
-        # x_int = torch.round(x_int)
+        # 将输入图像x传递给proj层进行卷积操作，将图像划分为一系列的patch，
+        # 并将每个patch编码为一个嵌入向量，输出的形状为[B, embed_dim, grid_size[0], grid_size[1]]
+        x = self.proj(x)
 
-        # Quantize weights
-        w = self.proj.weight
-        w_int = self.quantize_fn(w)
-        # w_scale = (2 ** (self.w_bit - 1) - 1)
-        # w_int = torch.clamp(w * w_scale, -w_scale, w_scale - 1)
-        # w_int = torch.round(w_int)
-
-        # Conv projection with quantized weights
-        x = F.conv2d(x_int, w_int, self.proj.bias, stride=self.patch_size)
-
-        # Scale output
-        x = x / (2 ** self.l_shift)
-        x = torch.round(torch.clamp(x, 0, 2 ** self.out_bit - 1))
-
-        # Reshape and normalize
+        # 重塑，并将嵌入向量传递给归一化层norm进行归一化处理
+        # flatten: [B, C, H, W] -> [B, C, HW]   将每个patch展平为一个向量
+        # transpose: [B, C, HW] -> [B, HW, C]   将嵌入向量的维度放在第二个维度上
         x = x.flatten(2).transpose(1, 2)
+
+        # 激活量化
+        x = self.act_quant(x)
+
         x = self.norm(x)
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        # 保存原有权重
+        Conv2d_Q = quant.conv2d_Q_fn(w_bit=w_bit)
+        old_proj_weight = self.proj.weight.data.detach().clone()
+        old_proj_bias = self.proj.bias.data.detach().clone() if self.proj.bias is not None else None
+        old_proj_device = self.proj.weight.device
+
+        self.proj = Conv2d_Q(self.proj.in_channels, self.proj.out_channels,
+                             kernel_size=self.proj.kernel_size, stride=self.proj.stride)
+        self.proj = self.proj.to(old_proj_device)
+        self.proj.weight.data.copy_(old_proj_weight)
+        if old_proj_bias is not None:
+            self.proj.bias.data.copy_(old_proj_bias)
+
+        # 激活量化刷新
+        self.w_bit = w_bit
+        self.in_bit = in_bit
+        self.out_bit = out_bit
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 
 class PatchEmbed(nn.Module):
@@ -241,16 +252,17 @@ class QuantizedAttention(nn.Module):
         self.scale = qk_scale or head_dim ** -0.5
         # q:query(to match others)   key(to be matched)   v(information to be extracted)
         # 量化的QKV投影, 将输入进行查询、键、值的投影
-        self.qkv = quant_ultra.QuantizedLinear(dim, dim * 3, bias=qkv_bias,
-                                               w_bit=w_bit, in_bit=in_bit, out_bit=out_bit)
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.qkv = Linear_Q(dim, dim * 3, bias=qkv_bias)
         # dropout层,在注意力权重上应用dropout
         self.attn_drop = nn.Dropout(attn_drop_ratio)
         # 量化的, 将多头注意力的输出进行投影
-        self.proj = quant_ultra.QuantizedLinear(dim, dim,
-                                                w_bit=w_bit, in_bit=in_bit, out_bit=out_bit)
+        self.proj = Linear_Q(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop_ratio)  # 在投影输出上应用dropout
-        # 注意力分数的量化
-        self.uniform_q = quant_ultra.uniform_quantize(k=w_bit - 1)
+
+        # 激活量化
+        self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
     def forward(self, x):
         # [batch_size, num_patches + 1, total_embed_dim]    (196+1, 768)
@@ -260,7 +272,9 @@ class QuantizedAttention(nn.Module):
         # qkv(): -> [batch_size, num_patches + 1, 3 * total_embed_dim]
         # reshape: -> [batch_size, num_patches + 1, 3(qkv三个参数), num_heads, embed_dim_per_head]
         # permute: -> [3, batch_size, num_heads, num_patches + 1, embed_dim_per_head]
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = self.qkv(x)
+        qkv = self.qkv_quant(qkv)  # 量化QKV输出
+        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         # [batch_size, num_heads, num_patches + 1, embed_dim_per_head]
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
@@ -269,8 +283,9 @@ class QuantizedAttention(nn.Module):
         # transpose: -> [batch_size, num_heads, embed_dim_per_head, num_patches + 1]
         # @: multiply矩阵乘法(只对最后两个维度操作) -> [batch_size, num_heads, num_patches + 1, num_patches + 1]
         attn = (q @ k.transpose(-2, -1)) * self.scale  # QK^{T}/sqrt(d_{k})
+        attn = self.act_quant(attn)  # 量化注意力分数
         attn = attn.softmax(dim=-1)  # -1代表最后一个维度，即对每一行进行softmax处理  softmax( QK^{T}/sqrt(d_{k}) )
-        attn = self.uniform_q(attn)  # 量化注意力权重
+        # softmax后的注意力权重通常不需要量化，因为它们已经在[0,1]范围内
         attn = self.attn_drop(attn)  # 在注意力权重上应用dropout
 
         ''' MultiHead(Q,K,V)=Concat(head1,...,headh)W^{O}, where headi = Attention(QW^{Q}i,KW^{K}i,VW^{V}i})'''
@@ -280,8 +295,35 @@ class QuantizedAttention(nn.Module):
         # reshape: -> [batch_size, num_patches + 1, total_embed_dim]    Concat拼接
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)  # 将多头注意力的输出进行投影  W^{O}
+        x = self.act_quant(x)  # 量化输出
         x = self.proj_drop(x)
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        # 备份原qkv和proj权重
+        old_qkv_weight = self.qkv.weight.data.detach().clone()
+        old_qkv_bias = self.qkv.bias.data.detach().clone() if self.qkv.bias is not None else None
+        old_proj_weight = self.proj.weight.data.detach().clone()
+        old_proj_bias = self.proj.bias.data.detach().clone() if self.proj.bias is not None else None
+        old_qkv_device = self.qkv.weight.device
+        old_proj_device = self.proj.weight.device
+
+        # 新建量化层
+        self.qkv = Linear_Q(self.qkv.in_features, self.qkv.out_features, bias=self.qkv.bias is not None)
+        self.qkv = self.qkv.to(old_qkv_device)
+        self.proj = Linear_Q(self.proj.in_features, self.proj.out_features, bias=self.proj.bias is not None)
+        self.proj = self.proj.to(old_proj_device)
+        # 拷贝参数
+        self.qkv.weight.data.copy_(old_qkv_weight)
+        if old_qkv_bias is not None:
+            self.qkv.bias.data.copy_(old_qkv_bias)
+        self.proj.weight.data.copy_(old_proj_weight)
+        if old_proj_bias is not None:
+            self.proj.bias.data.copy_(old_proj_bias)
+
+        self.qkv_quant = quant.activation_quantize_fn(a_bit=out_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 
 class Mlp(nn.Module):
@@ -320,28 +362,48 @@ class QuantizedMlp(nn.Module):
         hidden_features = hidden_features or in_features
 
         # 量化的全连接层
-        self.fc1 = quant_ultra.QuantizedLinear(in_features, hidden_features,
-                                               w_bit=w_bit, in_bit=in_bit, out_bit=out_bit)
-        self.fc2 = quant_ultra.QuantizedLinear(hidden_features, out_features,
-                                               w_bit=w_bit, in_bit=in_bit, out_bit=out_bit)
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.fc1 = Linear_Q(in_features, hidden_features)
+        self.fc2 = Linear_Q(hidden_features, out_features)
 
         # 激活函数量化
         self.act = act_layer()
-        self.act_quant = quant_ultra.activation_quantize_fn(a_bit=w_bit)
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
         self.drop = nn.Dropout(drop)
-
-        self.uniform_q = quant_ultra.uniform_quantize(k=w_bit - 1)
 
     def forward(self, x):
         # MLP Block:  Linear -> GELU -> Dropout -> Linear -> Dropout
         x = self.fc1(x)  # [197,768] -> [197,786*4=3072]
         x = self.act(x)
-        x = self.act_quant(x)  # Quantize activation
+        x = self.act_quant(x)  # 激活后量化
         x = self.drop(x)
         x = self.fc2(x)  # [197,3072] -> [198, 768]
-        x = self.uniform_q(x)  # Quantize output
+        # 此处不量化，在Block层统一处理
         x = self.drop(x)
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit):
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        # 备份参数
+        old_fc1_weight = self.fc1.weight.data.detach().clone()
+        old_fc1_bias = self.fc1.bias.data.detach().clone() if self.fc1.bias is not None else None
+        old_fc1_device = self.fc1.weight.device
+        old_fc2_weight = self.fc2.weight.data.detach().clone()
+        old_fc2_bias = self.fc2.bias.data.detach().clone() if self.fc2.bias is not None else None
+        old_fc2_device = self.fc2.weight.device
+
+        self.fc1 = Linear_Q(self.fc1.in_features, self.fc1.out_features, bias=self.fc1.bias is not None)
+        self.fc1 = self.fc1.to(old_fc1_device)
+        self.fc2 = Linear_Q(self.fc2.in_features, self.fc2.out_features, bias=self.fc2.bias is not None)
+        self.fc2 = self.fc2.to(old_fc2_device)
+        self.fc1.weight.data.copy_(old_fc1_weight)
+        if old_fc1_bias is not None:
+            self.fc1.bias.data.copy_(old_fc1_bias)
+        self.fc2.weight.data.copy_(old_fc2_weight)
+        if old_fc2_bias is not None:
+            self.fc2.bias.data.copy_(old_fc2_bias)
+
+        self.act_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
 
 class Block(nn.Module):
@@ -404,14 +466,36 @@ class QuantizedBlock(nn.Module):
         self.mlp = QuantizedMlp(in_features=dim, hidden_features=mlp_hidden_dim,
                                 act_layer=act_layer, drop=drop_ratio,
                                 w_bit=w_bit, in_bit=in_bit, out_bit=out_bit)
+        # 残差连接的量化
+        self.residual_quant = quant.activation_quantize_fn(a_bit=out_bit)
 
     def forward(self, x):
         # Encoder Block:
         # Layer Norm -> MultiHead Attention -> DropPath/Dropout ->捷径分支相加 ->
         # Layer Norm -> MLP Block -> DropPath/Dropout ->捷径分支相加
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+
+        # 第一个残差连接
+        residual = x
+        x = self.drop_path(self.attn(self.norm1(x)))
+        x = x + residual
+        x = self.residual_quant(x)  # 残差连接后量化
+
+        # 第二个残差连接
+        residual = x
+        x = self.drop_path(self.mlp(self.norm2(x)))
+        x = x + residual
+        x = self.residual_quant(x)  # 残差连接后量化
+
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit, quantize_attn=False, quantize_mlp=True):
+        # 仅当quantize_attn为True时才量化Attention
+        if quantize_attn and hasattr(self.attn, 'set_quant_bit'):
+            self.attn.set_quant_bit(w_bit, in_bit, out_bit)
+            self.residual_quant = quant.activation_quantize_fn(a_bit=out_bit)
+            # 仅当quantize_mlp为True时才量化MLP
+        if quantize_mlp and hasattr(self.mlp, 'set_quant_bit'):
+            self.mlp.set_quant_bit(w_bit, in_bit, out_bit)
 
 
 class VisionTransformer(nn.Module):
@@ -578,6 +662,8 @@ class QuantizedVisionTransformer(nn.Module):
         # position embedding
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))  # (1,196+1,768)
         self.pos_drop = nn.Dropout(p=drop_ratio)
+        # 添加位置嵌入后的量化
+        self.pos_quant = quant.activation_quantize_fn(a_bit=out_bit)
         # Encoder Block中 每个传入DropPath的drop_path_ratio为等差序列
         dpr = [x.item() for x in torch.linspace(0, drop_path_ratio, depth)]  # stochastic depth decay rule
         # Transformer Encoder
@@ -596,21 +682,22 @@ class QuantizedVisionTransformer(nn.Module):
         if representation_size and not distilled:
             self.has_logits = True
             self.num_features = representation_size
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
             self.pre_logits = nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(embed_dim, representation_size)),
-                ("act", nn.Tanh())
+                ("fc", Linear_Q(embed_dim, representation_size)),
+                ("act", nn.Tanh()),
+                ("quant", quant.activation_quantize_fn(a_bit=out_bit))
             ]))
         else:
             self.has_logits = False
             self.pre_logits = nn.Identity()
 
         # Classifier head(s)     MLP Head中的Linear
-        self.head = quant_ultra.QuantizedLinear(self.num_features, num_classes, w_bit=w_bit, in_bit=in_bit,
-                                                out_bit=out_bit) if num_classes > 0 else nn.Identity()
+        Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+        self.head = Linear_Q(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
         self.head_dist = None
         if distilled:
-            self.head_dist = quant_ultra.QuantizedLinear(self.embed_dim, self.num_classes, w_bit=w_bit, in_bit=in_bit,
-                                                         out_bit=out_bit) if num_classes > 0 else nn.Identity()
+            self.head_dist = Linear_Q(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
         # Weight init
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
@@ -636,6 +723,7 @@ class QuantizedVisionTransformer(nn.Module):
         """Concat(Class token) -> +Position Embedding -> Dropout"""
         # +pos_embed:(1, 1+N, E)，再加一个dropout层
         x = self.pos_drop(x + self.pos_embed)
+        x = self.pos_quant(x)
         """Dropout -> Transformer Encoder (堆叠12次Encoder Block) """
         x = self.blocks(x)
         """Transformer Encoder -> Layer Norm """
@@ -659,6 +747,69 @@ class QuantizedVisionTransformer(nn.Module):
         else:
             x = self.head(x)
         return x
+
+    def set_quant_bit(self, w_bit, in_bit, out_bit, quantize_head=True, quantize_patch_embed=False,
+                      quantize_attn_blocks=None, quantize_mlp_blocks=None):
+        """
+        - quantize_head: 是否量化head
+        - quantize_patch_embed: 是否量化PatchEmbed
+        - quantize_attn_blocks: 量化Attention的Block索引列表
+        - quantize_mlp_blocks: 量化MLP的Block索引列表
+        """
+        n_blocks = len(self.blocks)
+        quantize_attn_blocks = quantize_attn_blocks if quantize_attn_blocks is not None else []
+        quantize_mlp_blocks = quantize_mlp_blocks if quantize_mlp_blocks is not None else []
+        # PatchEmbed
+        if quantize_patch_embed and hasattr(self.patch_embed, 'set_quant_bit'):
+            self.patch_embed.set_quant_bit(w_bit, in_bit, out_bit)
+
+        # Blocks
+        for idx, block in enumerate(self.blocks):
+            quantize_attn = idx in quantize_attn_blocks
+            quantize_mlp = idx in quantize_mlp_blocks
+            block.set_quant_bit(w_bit, in_bit, out_bit, quantize_attn=quantize_attn, quantize_mlp=quantize_mlp)
+
+        # pre_logits可选
+        if hasattr(self, 'pre_logits') and isinstance(self.pre_logits, nn.Sequential):
+            # 如果pre_logits是nn.Sequential，且第一个层是Linear
+            if hasattr(self.pre_logits[0], 'weight'):
+                # 拷贝pre_logits[0]参数
+                old_fc_weight = self.pre_logits[0].weight.data.detach().clone()
+                old_fc_bias = self.pre_logits[0].bias.data.detach().clone() if self.pre_logits[
+                                                                                   0].bias is not None else None
+                old_fc_device = self.pre_logits[0].weight.device
+                Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+                self.pre_logits[0] = Linear_Q(self.pre_logits[0].in_features, self.pre_logits[0].out_features,
+                                              bias=self.pre_logits[0].bias is not None)
+                self.pre_logits[0] = self.pre_logits[0].to(old_fc_device)
+                self.pre_logits[0].weight.data.copy_(old_fc_weight)
+                if old_fc_bias is not None:
+                    self.pre_logits[0].bias.data.copy_(old_fc_bias)
+
+        # 量化 Head
+        if quantize_head and hasattr(self.head, 'set_quant_bit'):
+            old_head_weight = self.head.weight.data.detach().clone()
+            old_head_bias = self.head.bias.data.detach().clone() if self.head.bias is not None else None
+            old_head_device = self.head.weight.device
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head = Linear_Q(self.head.in_features, self.head.out_features, bias=self.head.bias is not None)
+            self.head = self.head.to(old_head_device)
+            self.head.weight.data.copy_(old_head_weight)
+            if old_head_bias is not None:
+                self.head.bias.data.copy_(old_head_bias)
+
+        # 如果有 dist head，同理
+        if hasattr(self, 'head_dist') and hasattr(self.head_dist, 'set_quant_bit'):
+            old_head_dist_weight = self.head_dist.weight.data.detach().clone()
+            old_head_dist_bias = self.head_dist.bias.data.detach().clone() if self.head_dist.bias is not None else None
+            old_head_dist_device = self.head_dist.weight.device
+            Linear_Q = quant.linear_Q_fn(w_bit=w_bit)
+            self.head_dist = Linear_Q(self.head_dist.in_features, self.head_dist.out_features,
+                                      bias=self.head_dist.bias is not None)
+            self.head_dist = self.head_dist.to(old_head_dist_device)
+            self.head_dist.weight.data.copy_(old_head_dist_weight)
+            if old_head_dist_bias is not None:
+                self.head_dist.bias.data.copy_(old_head_dist_bias)
 
 
 def _init_vit_weights(m):
