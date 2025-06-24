@@ -14,6 +14,8 @@ def qkd_loss(student_logits, targets, teacher_logits, temperature=2.0, alpha=0.5
     # alpha: 权重系数, 0.5-0.9, 越大，越注重真实标签;越小，越注重teacher输出
     # temperature: 温度参数,2-4,平滑teacher和student输出分布，放大soft label中的小概率信息,越大，概率分布越平滑，teacher信息更丰富
     ce_loss = F.cross_entropy(student_logits, targets)  # 交叉熵损失
+    assert teacher_logits.shape == student_logits.shape, \
+        f"teacher_logits shape {teacher_logits.shape} != student_logits shape {student_logits.shape}"
     # 计算KL散度损失
     kd_loss = F.kl_div(
         F.log_softmax(student_logits / temperature, dim=1),  # 学生模型的softmax输出
@@ -158,6 +160,9 @@ def train_one_epoch(model, teacher_model, optimizer, data_loader, device, epoch,
             # 使用混合精度训练 ,with 指令符可以自动处理前向和反向传播的精度
             with torch.amp.autocast('cuda'):
                 student_logits = model(images.to(device))   # 学生模型的输出
+                # 检查学生模型和教师模型的输出形状是否一致
+                assert student_logits.shape == teacher_logits.shape, \
+                    f"Shape mismatch: student {student_logits.shape}, teacher {teacher_logits.shape}"
                 loss = qkd_loss(student_logits, labels.to(device), teacher_logits, temperature, alpha)  # 计算知识蒸馏损失
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -165,6 +170,9 @@ def train_one_epoch(model, teacher_model, optimizer, data_loader, device, epoch,
         else:
             # 不使用混合精度训练
             student_logits = model(images.to(device))
+
+            assert student_logits.shape == teacher_logits.shape, \
+                f"Shape mismatch: student {student_logits.shape}, teacher {teacher_logits.shape}"
             loss = qkd_loss(student_logits, labels.to(device), teacher_logits, temperature, alpha)  # 计算知识蒸馏损失
             loss.backward()
             optimizer.step()    # 更新参数
