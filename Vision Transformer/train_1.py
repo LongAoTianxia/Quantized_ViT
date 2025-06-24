@@ -197,32 +197,98 @@ def main(args):
         ("head+MLP+allAttn", True, False, list(range(n_blocks)), mlp_blocks),
         ("all-main", True, True, list(range(n_blocks)), mlp_blocks),  # 全主干量化
     ]
-    # 针对每个量化配置，设定训练轮数和初始学习率
+    # 针对每个量化配置，定制训练轮数和初始学习率
     sweep_hyperparams = {
-        "head+MLP": {"epochs": 8, "lr": 9e-4},
-        "head+MLP+last1Attn": {"epochs": 10, "lr": 8e-4},
-        "head+MLP+last2Attn": {"epochs": 12, "lr": 7e-4},
-        "head+MLP+last3Attn": {"epochs": 14, "lr": 6e-4},
-        "head+MLP+last4Attn": {"epochs": 16, "lr": 5e-4},
-        "head+MLP+last5Attn": {"epochs": 18, "lr": 4e-4},
-        "head+MLP+last6Attn": {"epochs": 20, "lr": 3e-4},
-        "head+MLP+last7Attn": {"epochs": 22, "lr": 2.5e-4},
-        "head+MLP+last8Attn": {"epochs": 24, "lr": 2e-4},
-        "head+MLP+last9Attn": {"epochs": 26, "lr": 1.5e-4},
-        "head+MLP+last10Attn": {"epochs": 28, "lr": 1e-4},
-        "head+MLP+allAttn": {"epochs": 32, "lr": 1e-4},
+        # 每个key下加 "bit_epochs" 和 "bit_lrs"，分别为每个stage设置epochs/lr
+        "head+MLP": {
+            "epochs": 8, "lr": 9e-4,
+            "bit_epochs": [6, 10, 12],  # 8bit, 6bit, 4bit
+            "bit_lrs": [0.0009, 0.0005, 0.0004]
+        },
+        "head+MLP+last1Attn": {
+            "epochs": 10, "lr": 8e-4,
+            "bit_epochs": [6, 9, 10],
+            "bit_lrs": [0.0015, 0.0005, 0.0004]
+        },
+        "head+MLP+last2Attn": {
+            "epochs": 12, "lr": 7e-4,
+            "bit_epochs": [10, 10, 10],
+            "bit_lrs": [0.001, 0.0004, 0.00045]
+        },
+        "head+MLP+last3Attn": {
+            "epochs": 14, "lr": 6e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0015, 0.00045, 0.00045]
+        },
+        "head+MLP+last4Attn": {
+            "epochs": 16, "lr": 5e-4,
+            "bit_epochs": [9, 10, 10],
+            "bit_lrs": [0.001, 0.0004, 0.00045]
+        },
+        "head+MLP+last5Attn": {
+            "epochs": 18, "lr": 4e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0015, 0.0004, 0.00045]
+        },
+        "head+MLP+last6Attn": {
+            "epochs": 20, "lr": 3e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0018, 0.0005, 0.0005]
+        },
+        "head+MLP+last7Attn": {
+            "epochs": 22, "lr": 2.5e-4,
+            "bit_epochs": [7, 9, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0005]
+        },
+        "head+MLP+last8Attn": {
+            "epochs": 24, "lr": 2e-4,
+            "bit_epochs": [7, 12, 12],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last9Attn": {
+            "epochs": 26, "lr": 1.5e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last10Attn": {
+            "epochs": 28, "lr": 1e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last11Attn": {
+            "epochs": 30, "lr": 1e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.0004, 0.00035]
+        },
+        "head+MLP+allAttn": {
+            "epochs": 32, "lr": 1e-4,
+            "bit_epochs": [9, 10, 10],
+            "bit_lrs": [0.002, 0.0004, 0.0004]
+        },
+        "all-main": {
+            "epochs": 36, "lr": 8e-5,
+            "bit_epochs": [9, 10, 12],
+            "bit_lrs": [0.002, 0.0004, 0.0004]
+        }
     }
+
     # 定义分阶段QAT的bit宽度设置
     bit_stages = [(8, 8, 8), (6, 6, 6), (4, 4, 4)]
     # stage_epochs = [args.epochs // 3, args.epochs // 3, args.epochs - 2 * (args.epochs // 3)]
-    stage_epochs = [8, 10, 12]
+    # stage_epochs = [8, 10, 12]
+
     for sweep_idx, (desc, quantize_head, quantize_patch_embed, attn_blocks, mlp_blocks_) in enumerate(sweep_configs):
-        # 共14层
+
         print(f"\n==== Sweep {sweep_idx}: {desc} ====")
         # 每轮建议重新加载warmup后参数
         # torch.save(model.state_dict(), "./weights/warmup_model.pth")
         # model.load_state_dict(torch.load("./weights/warmup_model.pth"))
         best_acc = 0.0
+        # 获取当前配置的训练轮数和学习率
+        # cur_epochs = sweep_hyperparams.get(desc, {}).get("epochs", 12)
+        # cur_lr = sweep_hyperparams.get(desc, {}).get("lr", 3e-4)
+        bit_epochs = sweep_hyperparams.get(desc, {}).get("bit_epochs", [4, 4, 4])
+        bit_lrs = sweep_hyperparams.get(desc, {}).get("bit_lrs", [0.0009, 0.00045, 0.00035])
         # 分阶段QAT主循环
         start_epoch = 0
         for stage, (w_bit, in_bit, out_bit) in enumerate(bit_stages):
@@ -235,19 +301,13 @@ def main(args):
                 quantize_attn_blocks=attn_blocks,
                 quantize_mlp_blocks=mlp_blocks_
             )
-            if w_bit == 8:
-                args.lr = 0.0009  # 调高
-            elif w_bit == 6:
-                args.lr = 0.00045  # 调低
-            elif w_bit == 4:
-                args.lr = 0.00035    # 调低
-            qat_optimizer = torch.optim.AdamW(pg, lr=args.lr, weight_decay=args.weight_decay)
+            qat_optimizer = torch.optim.AdamW(pg, lr=bit_lrs[stage], weight_decay=args.weight_decay)
             # 可选：每阶段重置学习率调度器    Scheduler https://arxiv.org/pdf/1812.01187.pdf
-            lf = lambda x: ((1 + math.cos(x * math.pi / stage_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # Cosine学习率调度
+            lf = lambda x: ((1 + math.cos(x * math.pi / bit_epochs[stage])) / 2) * (1 - args.lrf) + args.lrf  # Cosine学习率调度
             scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
             # 每阶段保存best权重
             stage_best_acc = 0.0
-            for epoch in range(stage_epochs[stage]):
+            for epoch in range(bit_epochs[stage]):
                 global_epoch = start_epoch + epoch
                 # 训练
                 # 先粗调alpha，再微调temperature
@@ -279,7 +339,7 @@ def main(args):
                     best_acc = val_acc
 
             print(f"Stage {stage + 1} ({desc}) finished. Best acc: {stage_best_acc:.4f}")
-            start_epoch += stage_epochs[stage]
+            start_epoch += bit_epochs[stage]
 
         print(f"Progressive QAT completed. Best validation accuracy: {best_acc:.4f}")
 
