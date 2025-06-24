@@ -5,6 +5,7 @@ from pathlib import Path
 import zipfile
 import py7zr
 
+# 数据集预处理，解压，重新组织数据集结构
 
 def extract_7z_files(data_path):
     """解压7z文件"""
