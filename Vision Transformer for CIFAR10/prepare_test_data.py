@@ -3,6 +3,7 @@ import pandas as pd
 from PIL import Image
 import numpy as np
 
+# 预测前准备，将300,000张测试图片的信息整理成csv格式
 
 def prepare_test_data(data_path):
     """准备测试数据，生成测试图片列表"""
