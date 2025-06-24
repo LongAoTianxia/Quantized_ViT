@@ -1,0 +1,74 @@
+sweep_hyperparams = {
+        # 每个key下加 "bit_epochs" 和 "bit_lrs"，分别为每个stage设置epochs/lr
+        "head+MLP": {
+            "epochs": 8, "lr": 9e-4,
+            "bit_epochs": [6, 10, 12],  # 8bit, 6bit, 4bit
+            "bit_lrs": [0.0009, 0.0005, 0.0004]
+        },
+        "head+MLP+last1Attn": {
+            "epochs": 10, "lr": 8e-4,
+            "bit_epochs": [6, 9, 10],
+            "bit_lrs": [0.0015, 0.0005, 0.0004]
+        },
+        "head+MLP+last2Attn": {
+            "epochs": 12, "lr": 7e-4,
+            "bit_epochs": [10, 10, 10],
+            "bit_lrs": [0.001, 0.0004, 0.00045]
+        },
+        "head+MLP+last3Attn": {
+            "epochs": 14, "lr": 6e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0015, 0.00045, 0.00045]
+        },
+        "head+MLP+last4Attn": {
+            "epochs": 16, "lr": 5e-4,
+            "bit_epochs": [9, 10, 10],
+            "bit_lrs": [0.001, 0.0004, 0.00045]
+        },
+        "head+MLP+last5Attn": {
+            "epochs": 18, "lr": 4e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0015, 0.0004, 0.00045]
+        },
+        "head+MLP+last6Attn": {
+            "epochs": 20, "lr": 3e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.0018, 0.0005, 0.0005]
+        },
+        "head+MLP+last7Attn": {
+            "epochs": 22, "lr": 2.5e-4,
+            "bit_epochs": [7, 9, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0005]
+        },
+        "head+MLP+last8Attn": {
+            "epochs": 24, "lr": 2e-4,
+            "bit_epochs": [7, 12, 12],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last9Attn": {
+            "epochs": 26, "lr": 1.5e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last10Attn": {
+            "epochs": 28, "lr": 1e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.00045, 0.0004]
+        },
+        "head+MLP+last11Attn": {
+            "epochs": 30, "lr": 1e-4,
+            "bit_epochs": [8, 10, 10],
+            "bit_lrs": [0.002, 0.0004, 0.00035]
+        },
+        "head+MLP+allAttn": {
+            "epochs": 32, "lr": 1e-4,
+            "bit_epochs": [9, 10, 10],
+            "bit_lrs": [0.002, 0.0004, 0.0004]
+        },
+        "all-main": {
+            "epochs": 36, "lr": 8e-5,
+            "bit_epochs": [9, 10, 12],
+            "bit_lrs": [0.002, 0.0004, 0.0004]
+        }
+    }
+alpha=0.7,  temperature=2.0
