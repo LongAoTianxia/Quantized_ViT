@@ -164,9 +164,9 @@ def train_one_epoch(model, teacher_model, optimizer, data_loader, device, epoch,
                 assert student_logits.shape == teacher_logits.shape, \
                     f"Shape mismatch: student {student_logits.shape}, teacher {teacher_logits.shape}"
                 loss = qkd_loss(student_logits, labels.to(device), teacher_logits, temperature, alpha)  # 计算知识蒸馏损失
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss).backward()   # 反向传播和优化
+            scaler.step(optimizer)  # 更新参数
+            scaler.update()  # 更新缩放器
         else:
             # 不使用混合精度训练
             student_logits = model(images.to(device))
