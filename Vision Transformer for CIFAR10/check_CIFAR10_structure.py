@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 
+# 查看数据集结构
 
 def check_cifar10_data():
     data_path = "D:/python/PycharmProjects/data/CIFAR-10"
