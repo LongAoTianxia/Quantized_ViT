@@ -3,12 +3,27 @@ import sys
 import json
 import pickle
 import random
-
+import torch.nn.functional as F
 import torch
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
+
+def qkd_loss(student_logits, targets, teacher_logits, temperature=2.0, alpha=0.5):
+    """    计算知识蒸馏损失函数   """
+    # alpha: 权重系数, 0.5-0.9, 越大，越注重真实标签;越小，越注重teacher输出
+    # temperature: 温度参数,2-4,平滑teacher和student输出分布，放大soft label中的小概率信息,越大，概率分布越平滑，teacher信息更丰富
+    ce_loss = F.cross_entropy(student_logits, targets)  # 交叉熵损失
+    assert teacher_logits.shape == student_logits.shape, \
+        f"teacher_logits shape {teacher_logits.shape} != student_logits shape {student_logits.shape}"
+    # 计算KL散度损失
+    kd_loss = F.kl_div(
+        F.log_softmax(student_logits / temperature, dim=1),  # 学生模型的softmax输出
+        F.softmax(teacher_logits / temperature, dim=1),  # 教师模型的softmax输出
+        reduction='batchmean'   # 批量平均
+    ) * (temperature * temperature)  # 缩放KL散度损失, temperature: 温度参数
+    return alpha * ce_loss + (1 - alpha) * kd_loss  # 加权损失函数
 
 def read_split_data(root: str, val_rate: float = 0.2):
     random.seed(0)  # 保证随机结果可复现
@@ -142,45 +157,82 @@ def read_pickle(file_name: str) -> list:
         return info_list
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch):
+def train_one_epoch(model, teacher_model, optimizer, data_loader, device, epoch, use_mixed_precision=False,
+                    alpha=0.5, temperature=2.0):
+    """量化模型的训练函数，支持混合精度训练和知识蒸馏"""
     model.train()
-    loss_function = torch.nn.CrossEntropyLoss()
+    teacher_model.eval()
+    # loss_function = torch.nn.CrossEntropyLoss()
     accu_loss = torch.zeros(1).to(device)  # 累计损失
-    accu_num = torch.zeros(1).to(device)   # 累计预测正确的样本数
+    accu_num = torch.zeros(1).to(device)  # 累计预测正确的样本数
     optimizer.zero_grad()
 
-    sample_num = 0
+    # 添加混合精度支持
+    if use_mixed_precision:
+        scaler = torch.amp.GradScaler('cuda')
+
+    sample_num = 0  # 累计样本数
+    # 使用tqdm显示进度条
     data_loader = tqdm(data_loader, file=sys.stdout)
     for step, data in enumerate(data_loader):
+        # 获取数据
         images, labels = data
+        # 累计样本数
         sample_num += images.shape[0]
 
-        pred = model(images.to(device))
-        pred_classes = torch.max(pred, dim=1)[1]
-        accu_num += torch.eq(pred_classes, labels.to(device)).sum()
+        with torch.no_grad():  # 不需要梯度计算
+            with torch.amp.autocast('cuda') if use_mixed_precision else torch.no_grad():    # 使用混合精度
+                teacher_logits = teacher_model(images.to(device))   # 教师模型的输出
 
-        loss = loss_function(pred, labels.to(device))
-        loss.backward()
+        if use_mixed_precision:
+            # 使用混合精度训练 ,with 指令符可以自动处理前向和反向传播的精度
+            with torch.amp.autocast('cuda'):
+                student_logits = model(images.to(device))  # 学生模型的输出
+                # 检查学生模型和教师模型的输出形状是否一致
+                assert student_logits.shape == teacher_logits.shape, \
+                    f"Shape mismatch: student {student_logits.shape}, teacher {teacher_logits.shape}"
+                loss = qkd_loss(student_logits, labels.to(device), teacher_logits, temperature, alpha)  # 计算知识蒸馏损失
+            scaler.scale(loss).backward()  # 反向传播和优化
+            scaler.step(optimizer)  # 更新参数
+            scaler.update()  # 更新缩放器
+        else:
+            # 不使用混合精度训练
+            student_logits = model(images.to(device))
+
+            assert student_logits.shape == teacher_logits.shape, \
+                f"Shape mismatch: student {student_logits.shape}, teacher {teacher_logits.shape}"
+            loss = qkd_loss(student_logits, labels.to(device), teacher_logits, temperature, alpha)  # 计算知识蒸馏损失
+            loss.backward()
+            optimizer.step()  # 更新参数
+
+        # 计算预测类别
+        pred_classes = torch.max(student_logits, dim=1)[1]
+        # 累计预测正确的样本数和损失
+        accu_num += torch.eq(pred_classes, labels.to(device)).sum()
+        # 累计损失
         accu_loss += loss.detach()
 
         data_loader.desc = "[train epoch {}] loss: {:.3f}, acc: {:.3f}".format(epoch,
                                                                                accu_loss.item() / (step + 1),
                                                                                accu_num.item() / sample_num)
 
+        # 检查损失是否为非有限值
         if not torch.isfinite(loss):
             print('WARNING: non-finite loss, ending training ', loss)
             sys.exit(1)
 
-        optimizer.step()
+        # 清除梯度
         optimizer.zero_grad()
 
+    # 返回平均损失和准确率
     return accu_loss.item() / (step + 1), accu_num.item() / sample_num
 
 
 @torch.no_grad()
 def evaluate(model, data_loader, device, epoch):
+    """ 评估模型 """
     loss_function = torch.nn.CrossEntropyLoss()
-
+    # 将模型设置为评估模式
     model.eval()
 
     accu_num = torch.zeros(1).to(device)   # 累计预测正确的样本数
