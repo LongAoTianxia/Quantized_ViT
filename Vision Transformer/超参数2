@@ -1,0 +1,89 @@
+sweep_hyperparams = {
+        # 每个key下加 "bit_epochs" 和 "bit_lrs"，分别为每个stage设置epochs/lr
+        "head+MLP": {
+            "epochs": 8, "lr": 9e-4,
+            "bit_epochs": [6, 10, 15],  # 8bit, 6bit, 4bit
+            "bit_lrs": [0.0009, 0.0005, 0.00035]
+        },
+        "head+MLP+last1Attn": {
+            "epochs": 10, "lr": 8e-4,
+            "bit_epochs": [20, 15, 23],
+            "bit_lrs": [0.0015, 0.0003, 0.0001]
+        },
+        "head+MLP+last2Attn": {
+            "epochs": 12, "lr": 7e-4,
+            "bit_epochs": [18, 23, 25],
+            "bit_lrs": [0.0012, 0.0001, 0.0001]
+        },
+        "head+MLP+last3Attn": {
+            "epochs": 14, "lr": 6e-4,
+            "bit_epochs": [22, 25, 28],
+            "bit_lrs": [0.0015, 0.00007, 0.00005]
+        },
+        "head+MLP+last4Attn": {
+            "epochs": 16, "lr": 5e-4,
+            "bit_epochs": [25, 25, 30],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]    # 8-bit 0.001  0.8804
+        },
+        "head+MLP+last5Attn": {
+            "epochs": 18, "lr": 4e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last6Attn": {     # 下降明显
+            "epochs": 20, "lr": 3e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last7Attn": {     # 掉落严重
+            "epochs": 22, "lr": 2.5e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last8Attn": {     # 大幅掉落
+            "epochs": 24, "lr": 2e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last9Attn": {     # 大幅掉落
+            "epochs": 26, "lr": 1.5e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last10Attn": {
+            "epochs": 28, "lr": 1e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
+        },
+        "head+MLP+last11Attn": {
+            "epochs": 30, "lr": 1e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
+        },
+        "head+MLP+allAttn": {
+            "epochs": 32, "lr": 1e-4,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
+        },
+        "all-main": {
+            "epochs": 36, "lr": 8e-5,
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
+        }
+    }
+
+if w_bit == 4:
+    if epoch > 20:
+        alpha = 0.25
+    else:
+        alpha = 0.3  # 主任务权重更低，蒸馏loss权重0.7（即更依赖Teacher）
+    temperature = 2.8  # 也可适当调高
+elif w_bit == 6:
+    if epoch > 10:
+        alpha = 0.4
+    else:
+        alpha = 0.5
+    temperature = 2.2
+else:
+    alpha = 0.7
+    temperature = 2.0
