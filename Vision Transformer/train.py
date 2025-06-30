@@ -67,7 +67,7 @@ def main(args):
         "train": transforms.Compose([transforms.RandomResizedCrop(224),  # 随机裁剪一块面积和宽高比随机的区域，并将其缩放到224x224,增加数据多样性，防止模型过拟合
                                      transforms.RandomHorizontalFlip(),  # 随机水平翻转
                                      transforms.ToTensor(),  # 转换为Tensor
-                                     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),
+                                     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]),  # 标准化处理
         "val": transforms.Compose([transforms.Resize(256),  # 调整图片大小为256x256
                                    transforms.CenterCrop(224),  # 中心裁剪224x224大小
                                    transforms.ToTensor(),
@@ -158,12 +158,13 @@ def main(args):
     n_blocks = len(model.blocks) # 12
     mlp_blocks = list(range(n_blocks))
 
+    # """
     # ========== Warmup：先FP32训练 ==========
     print("==== Warmup FP32 Training (no quantization) ====")
     model.set_quant_bit(32, 32, 32, quantize_head=True, quantize_patch_embed=True,
                         quantize_attn_blocks=list(range(n_blocks)),
                         quantize_mlp_blocks=mlp_blocks)
-    warmup_epochs = 3  # 可根据实际情况设为10~20
+    warmup_epochs = 5  # 可根据实际情况设为10~20
     warmup_optimizer = torch.optim.AdamW(pg, lr=0.002, weight_decay=args.weight_decay)
     for epoch in range(warmup_epochs):
         train_loss, train_acc = train_one_epoch(
@@ -179,6 +180,7 @@ def main(args):
         val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=epoch)
         print(f"[FP32 warmup] epoch {epoch}: train_acc={train_acc:.4f}, val_acc={val_acc:.4f}")
     torch.save(model.state_dict(), "./weights/FP32_warmup.pth")  # 保存warmup后的模型
+    # """
 
     # ========== 量化配置Sweep ==========
     sweep_configs = [
@@ -209,73 +211,73 @@ def main(args):
         # 每个key下加 "bit_epochs" 和 "bit_lrs"，分别为每个stage设置epochs/lr
         "head+MLP": {
             "epochs": 8, "lr": 9e-4,
-            "bit_epochs": [6, 10, 8],  # 8bit, 6bit, 4bit
-            "bit_lrs": [0.001, 0.0005, 0.0005]
+            "bit_epochs": [6, 10, 15],  # 8bit, 6bit, 4bit
+            "bit_lrs": [0.0009, 0.0005, 0.00035]
         },
         "head+MLP+last1Attn": {
             "epochs": 10, "lr": 8e-4,
-            "bit_epochs": [7, 9, 12],
-            "bit_lrs": [0.002, 0.00045, 0.0005]
+            "bit_epochs": [20, 15, 23],
+            "bit_lrs": [0.0015, 0.0003, 0.0001]
         },
         "head+MLP+last2Attn": {
             "epochs": 12, "lr": 7e-4,
-            "bit_epochs": [10, 12, 10],
-            "bit_lrs": [0.0015, 0.00035, 0.0005]
+            "bit_epochs": [18, 23, 25],
+            "bit_lrs": [0.0012, 0.0001, 0.0001]
         },
         "head+MLP+last3Attn": {
             "epochs": 14, "lr": 6e-4,
-            "bit_epochs": [9, 12, 10],
-            "bit_lrs": [0.002, 0.0004, 0.00045]
+            "bit_epochs": [22, 25, 28],
+            "bit_lrs": [0.0015, 0.00007, 0.00005]
         },
         "head+MLP+last4Attn": {
             "epochs": 16, "lr": 5e-4,
-            "bit_epochs": [9, 12, 12],
-            "bit_lrs": [0.001, 0.00045, 0.0005]
+            "bit_epochs": [25, 25, 30],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]    # 8-bit 0.001  0.8804
         },
         "head+MLP+last5Attn": {
             "epochs": 18, "lr": 4e-4,
-            "bit_epochs": [10, 10, 12],
-            "bit_lrs": [0.002, 0.0004, 0.00045]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last6Attn": {     # 下降明显
             "epochs": 20, "lr": 3e-4,
-            "bit_epochs": [10, 12, 12],
-            "bit_lrs": [0.002, 0.00045, 0.00055]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last7Attn": {     # 掉落严重
             "epochs": 22, "lr": 2.5e-4,
-            "bit_epochs": [10, 10, 12],
-            "bit_lrs": [0.0025, 0.0005, 0.00055]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last8Attn": {     # 大幅掉落
             "epochs": 24, "lr": 2e-4,
-            "bit_epochs": [10, 12, 14],
-            "bit_lrs": [0.0025, 0.0005, 0.00045]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last9Attn": {     # 大幅掉落
             "epochs": 26, "lr": 1.5e-4,
-            "bit_epochs": [10, 12, 12],
-            "bit_lrs": [0.0025, 0.0005, 0.00045]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last10Attn": {
             "epochs": 28, "lr": 1e-4,
-            "bit_epochs": [10, 12, 12],
-            "bit_lrs": [0.0025, 0.00045, 0.00045]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.0001, 0.00004]
         },
         "head+MLP+last11Attn": {
             "epochs": 30, "lr": 1e-4,
-            "bit_epochs": [10, 12, 12],
-            "bit_lrs": [0.0025, 0.00045, 0.0004]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
         },
         "head+MLP+allAttn": {
             "epochs": 32, "lr": 1e-4,
-            "bit_epochs": [11, 11, 12],
-            "bit_lrs": [0.0025, 0.00045, 0.0005]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
         },
         "all-main": {
             "epochs": 36, "lr": 8e-5,
-            "bit_epochs": [12, 12, 14],
-            "bit_lrs": [0.0025, 0.0004, 0.00045]
+            "bit_epochs": [40, 30, 40],
+            "bit_lrs": [0.0015, 0.00007, 0.00003]
         }
     }
 
@@ -314,8 +316,26 @@ def main(args):
             scheduler = lr_scheduler.LambdaLR(qat_optimizer, lr_lambda=lf)
             # 每阶段保存best权重
             stage_best_acc = 0.0
+
             for epoch in range(bit_epochs[stage]):
                 global_epoch = start_epoch + epoch
+                # --------- 动态调整 alpha（蒸馏loss权重），4bit阶段更偏向teacher ---------
+                if w_bit == 4:
+                    if epoch > 20:
+                        alpha = 0.25
+                    else:
+                        alpha = 0.3  # 主任务权重更低，蒸馏loss权重0.7（即更依赖Teacher）
+                    temperature = 2.8  # 也可适当调高
+                elif w_bit == 6:
+                    if epoch > 10:
+                        alpha = 0.4
+                    else:
+                        alpha = 0.5
+                    temperature = 2.2
+                else:
+                    alpha = 0.7
+                    temperature = 2.0
+                # -------------------------------------------------------------
                 # 训练
                 # 先粗调alpha，再微调temperature
                 # 精度提升很小，适当减少alpha; 过拟合/精度不稳定,大alpha
@@ -323,7 +343,7 @@ def main(args):
                                                         optimizer=qat_optimizer, data_loader=train_loader,
                                                         device=device, epoch=global_epoch,
                                                         use_mixed_precision=args.mixed_precision,
-                                                        alpha=0.7, temperature=2.0)
+                                                        alpha=alpha, temperature=temperature)
                 scheduler.step()
                 # 验证
                 val_loss, val_acc = evaluate(model=model, data_loader=val_loader, device=device, epoch=global_epoch)
@@ -367,15 +387,15 @@ if __name__ == '__main__':
     # 数据集所在根目录
     # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
     parser.add_argument('--data-path', type=str,
-                        default="D:/python/PycharmProjects/data/ball_15/train")
+                        default="./data/ball_15/train")
     parser.add_argument('--model-name', default='', help='create model name')
 
     # 预训练权重路径，如果不想载入就设置为空字符
-    parser.add_argument('--weights', type=str, default="D:/python/PycharmProjects/VIT_pretrained_weights/vit_base_patch16_224_in21k.pth",
+    parser.add_argument('--weights', type=str, default="./ViT_pretrained/vit_base_patch16_224_in21k.pth",
                         help='initial weights path')
     # 教师模型权重路径
     parser.add_argument('--teacher-weights', type=str,
-                        default="D:/python/PycharmProjects/vision_transformer/weights/weightsSave/model-9_ball.pth",
+                        default="./ViT_pretrained/model-9_ball.pth",
                         help='teacher weights path (FP32)')
     # 是否冻结权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
