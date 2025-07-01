@@ -8,82 +8,110 @@ sweep_hyperparams = {
         "head+MLP+last1Attn": {
             "epochs": 10, "lr": 8e-4,
             "bit_epochs": [20, 15, 23],
-            "bit_lrs": [0.0015, 0.0003, 0.0001]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last2Attn": {
             "epochs": 12, "lr": 7e-4,
             "bit_epochs": [18, 23, 25],
-            "bit_lrs": [0.0012, 0.0001, 0.0001]
+            "bit_lrs": [0.0012, 0.0004, 0.0005]
         },
         "head+MLP+last3Attn": {
             "epochs": 14, "lr": 6e-4,
             "bit_epochs": [22, 25, 28],
-            "bit_lrs": [0.0015, 0.00007, 0.00005]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last4Attn": {
             "epochs": 16, "lr": 5e-4,
             "bit_epochs": [25, 25, 30],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]    # 8-bit 0.001  0.8804
+            "bit_lrs": [0.0015, 0.0004, 0.0005]    # 8-bit 0.001  0.8804
         },
         "head+MLP+last5Attn": {
             "epochs": 18, "lr": 4e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last6Attn": {     # 下降明显
             "epochs": 20, "lr": 3e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last7Attn": {     # 掉落严重
             "epochs": 22, "lr": 2.5e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last8Attn": {     # 大幅掉落
             "epochs": 24, "lr": 2e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last9Attn": {     # 大幅掉落
             "epochs": 26, "lr": 1.5e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last10Attn": {
             "epochs": 28, "lr": 1e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.0001, 0.00004]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+last11Attn": {
             "epochs": 30, "lr": 1e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.00007, 0.00003]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "head+MLP+allAttn": {
             "epochs": 32, "lr": 1e-4,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.00007, 0.00003]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         },
         "all-main": {
             "epochs": 36, "lr": 8e-5,
             "bit_epochs": [40, 30, 40],
-            "bit_lrs": [0.0015, 0.00007, 0.00003]
+            "bit_lrs": [0.0015, 0.0004, 0.0005]
         }
     }
 
 if w_bit == 4:
-    if epoch > 20:
-        alpha = 0.25
+    if epoch < bit_epochs[stage] // 2:
+        alpha = 0.1     # 几乎完全模仿老师
+        temperature = 5.0  # 更“平滑”，容易学
     else:
-        alpha = 0.3  # 主任务权重更低，蒸馏loss权重0.7（即更依赖Teacher）
-    temperature = 2.8  # 也可适当调高
+        alpha = 0.2  # 主任务权重更低，蒸馏loss权重0.7（即更依赖Teacher）
+        temperature = 3  # 也可适当调高
 elif w_bit == 6:
     if epoch > 10:
         alpha = 0.4
     else:
         alpha = 0.5
-    temperature = 2.2
+    temperature = 2.3
 else:
     alpha = 0.7
     temperature = 2.0
+
+parser = argparse.ArgumentParser()
+    parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
+    parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次(模型内具体修改)
+    parser.add_argument('--batch-size', type=int, default=16)    # 8
+    parser.add_argument('--lr', type=float, default=0.0003)  # 更小的学习率 0.001 (模型内具体修改)
+    parser.add_argument('--lrf', type=float, default=0.01)  # 学习率衰减系数
+    parser.add_argument('--weight-decay', type=float, default=0.05)  # 权重衰减
+    parser.add_argument('--mixed-precision', type=bool, default=True)
+    parser.add_argument('--mixup-alpha', type=float, default=0.8, help='alpha parameter for mixup augmentation')
+
+    # 数据集所在根目录
+    # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
+    parser.add_argument('--data-path', type=str,
+                        default="./data/ball_15/train")
+    parser.add_argument('--model-name', default='', help='create model name')
+
+    # 预训练权重路径，如果不想载入就设置为空字符
+    parser.add_argument('--weights', type=str, default="./ViT_pretrained/vit_base_patch16_224_in21k.pth",
+                        help='initial weights path')
+    # 教师模型权重路径
+    parser.add_argument('--teacher-weights', type=str,
+                        default="./ViT_pretrained/model-9_ball.pth",
+                        help='teacher weights path (FP32)')
+    # 是否冻结权重
+    parser.add_argument('--freeze-layers', type=bool, default=False)
+    parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
