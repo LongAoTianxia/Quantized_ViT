@@ -72,3 +72,29 @@ sweep_hyperparams = {
         }
     }
 alpha=0.7,  temperature=2.0
+
+parser = argparse.ArgumentParser()
+    parser.add_argument('--num_classes', type=int, default=15)     # 修改，种类数num_classes
+    parser.add_argument('--epochs', type=int, default=50)       # 量化模型可能需要更多轮次(模型内具体修改)
+    parser.add_argument('--batch-size', type=int, default=16)    # 8
+    parser.add_argument('--lr', type=float, default=0.0003)  # 更小的学习率 0.001 (模型内具体修改)
+    parser.add_argument('--lrf', type=float, default=0.01)  # 学习率衰减系数
+    parser.add_argument('--weight-decay', type=float, default=0.05)  # 权重衰减
+    parser.add_argument('--mixed-precision', type=bool, default=True)
+
+    # 数据集所在根目录
+    # https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz
+    parser.add_argument('--data-path', type=str,
+                        default="./data/ball_15/train")
+    parser.add_argument('--model-name', default='', help='create model name')
+
+    # 预训练权重路径，如果不想载入就设置为空字符
+    parser.add_argument('--weights', type=str, default="./ViT_pretrained/vit_base_patch16_224_in21k.pth",
+                        help='initial weights path')
+    # 教师模型权重路径
+    parser.add_argument('--teacher-weights', type=str,
+                        default="./ViT_pretrained/model-9_ball.pth",
+                        help='teacher weights path (FP32)')
+    # 是否冻结权重
+    parser.add_argument('--freeze-layers', type=bool, default=False)
+    parser.add_argument('--device', default='cuda:0', help='device id (i.e. 0 or 0,1 or cpu)')
