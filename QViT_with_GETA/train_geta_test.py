@@ -142,38 +142,44 @@ def get_bitwidth_dict(param_dict):
 
     return bit_dict
 
-"""
-def transforms_train():
-    return transforms.Compose(
-        [transforms.RandomResizedCrop(224),
-         transforms.RandomHorizontalFlip(),
-         transforms.ToTensor(),
-         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]
-    )
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+CIFAR_MEAN = (0.4914, 0.4822, 0.4465)
+CIFAR_STD = (0.2023, 0.1994, 0.2010)
 
 
-def transforms_test():
-    return transforms.Compose(
-        [transforms.Resize(256),
-         transforms.CenterCrop(224),
-         transforms.ToTensor(),
-         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])]
-    )
-"""
-def transforms_train():
-    normalize = transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                     (0.2023, 0.1994, 0.2010))
+def transforms_train(dataset: str):
+    """Return dataset-specific training transforms."""
+    if dataset == "imagenet":
+        return transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ])
+
+    # Default to CIFAR transforms
+    normalize = transforms.Normalize(CIFAR_MEAN, CIFAR_STD)
     return transforms.Compose([
         transforms.Resize(224),
-        transforms.RandomCrop(224, padding=4),  # 或 RandomResizedCrop(224)
+        transforms.RandomCrop(224, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize,
     ])
 
-def transforms_test():
-    normalize = transforms.Normalize((0.4914, 0.4822, 0.4465),
-                                     (0.2023, 0.1994, 0.2010))
+
+def transforms_test(dataset: str):
+    """Return dataset-specific validation transforms."""
+    if dataset == "imagenet":
+        return transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        ])
+
+    normalize = transforms.Normalize(CIFAR_MEAN, CIFAR_STD)
     return transforms.Compose([
         transforms.Resize(224),
         transforms.CenterCrop(224),
@@ -181,11 +187,46 @@ def transforms_test():
         normalize,
     ])
 
+
 def build_cifar10_loaders(root, batch_size, nw):
     train_ds = datasets.CIFAR10(root=root, train=True, download=False,
-                                transform=transforms_train())
+                                transform=transforms_train("cifar10"))
     val_ds = datasets.CIFAR10(root=root, train=False, download=False,
-                              transform=transforms_test())
+                              transform=transforms_test("cifar10"))
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=nw, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=nw, pin_memory=True)
+    return train_loader, val_loader
+
+
+def build_cifar100_loaders(root, batch_size, nw):
+    train_ds = datasets.CIFAR100(root=root, train=True, download=False,
+                                 transform=transforms_train("cifar100"))
+    val_ds = datasets.CIFAR100(root=root, train=False, download=False,
+                               transform=transforms_test("cifar100"))
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=nw, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=nw, pin_memory=True)
+    return train_loader, val_loader
+
+
+def build_imagenet_loaders(root, batch_size, nw):
+    """
+    Build ImageNet-1k dataloaders.
+
+    Expected directory structure:
+    root/
+      train/*class*/image.jpg
+      val/*class*/image.jpg
+    """
+    train_dir = os.path.join(root, "train")
+    val_dir = os.path.join(root, "val")
+
+    train_ds = datasets.ImageFolder(train_dir, transform=transforms_train("imagenet"))
+    val_ds = datasets.ImageFolder(val_dir, transform=transforms_test("imagenet"))
+
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               num_workers=nw, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
@@ -195,7 +236,7 @@ def build_cifar10_loaders(root, batch_size, nw):
 def Train_loader(train_images_path, train_images_label, batch_size, nw):
     train_dataset = MyDataSet(images_path=train_images_path,
                               images_class=train_images_label,
-                              transform=transforms_train())
+                              transform=transforms_train("cifar10"))
 
     return DataLoader(train_dataset,
                       batch_size=batch_size,
@@ -209,7 +250,7 @@ def Train_loader(train_images_path, train_images_label, batch_size, nw):
 def Test_loader(val_images_path, val_images_label, batch_size, nw):
     val_dataset = MyDataSet(images_path=val_images_path,
                             images_class=val_images_label,
-                            transform=transforms_test())
+                            transform=transforms_test("cifar10"))
     return DataLoader(val_dataset,
                       batch_size=batch_size,
                       shuffle=False,
@@ -267,9 +308,20 @@ def main(args):
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0])
     print(f'Using {nw} dataloader workers every process')
 
-    # train_loader = Train_loader(train_images_path, train_images_label, batch_size, nw)
-    # val_loader = Test_loader(val_images_path, val_images_label, batch_size, nw)
-    train_loader, val_loader = build_cifar10_loaders(args.data_path, batch_size, nw)
+    # 根据数据集构建 DataLoader
+    if args.dataset == "cifar10":
+        train_loader, val_loader = build_cifar10_loaders(args.data_path, batch_size, nw)
+    elif args.dataset == "cifar100":
+        train_loader, val_loader = build_cifar100_loaders(args.data_path, batch_size, nw)
+    elif args.dataset == "imagenet":
+        train_loader, val_loader = build_imagenet_loaders(args.data_path, batch_size, nw)
+    else:
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
+
+    # 根据数据集自动设置类别数（如未显式传入）
+    default_num_classes = {"cifar10": 10, "cifar100": 100, "imagenet": 1000}
+    if args.num_classes is None:
+        args.num_classes = default_num_classes.get(args.dataset, args.num_classes)
 
     # 创建模型
     print("Creating model...")
@@ -611,7 +663,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # 模型参数
-    parser.add_argument('--num_classes', type=int, default=10, help='Number of classes')
+    parser.add_argument('--dataset', type=str, default='cifar10',
+                        choices=['cifar10', 'cifar100', 'imagenet'],
+                        help='Dataset to use')
+    parser.add_argument('--num_classes', type=int, default=None,
+                        help='Number of classes (auto-set if not provided)')
     parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
 
@@ -646,7 +702,8 @@ if __name__ == '__main__':
     #                    default="D:/python/PycharmProjects/data/cifar10",
     #                    help='Dataset path')
     parser.add_argument('--data-path', type=str,
-                        default="/root/autodl-tmp/data/cifar10")
+                        default="/root/autodl-tmp/data/cifar10",
+                        help='Dataset root path (for ImageNet, should contain train/ and val/ folders)')
     #parser.add_argument('--weights', type=str,
     #                    default='D:/python/PycharmProjects/VIT_pretrained_weights/model-1.pth',
     #                    help='Initial weights path')
